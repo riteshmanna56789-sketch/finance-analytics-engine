@@ -109,6 +109,19 @@ static void print_category_error(CategoryResult result)
     }
 }
 
+static void print_deactivation_error(CategoryResult result)
+{
+    if (result == CATEGORY_NOT_FOUND) {
+        printf("No category exists with that ID.\n");
+    } else if (result == CATEGORY_ALREADY_INACTIVE) {
+        printf("That category is already inactive.\n");
+    } else if (result == CATEGORY_INVALID_INPUT) {
+        printf("Invalid category ID.\n");
+    } else {
+        printf("Unable to deactivate the category.\n");
+    }
+}
+
 static void view_categories(const CategoryList *categories)
 {
     size_t active_count = category_active_count(categories);
@@ -160,6 +173,51 @@ static int create_category(CategoryList *categories)
     return 1;
 }
 
+static int deactivate_category(CategoryList *categories)
+{
+    char input[100];
+    int choice;
+    int active_count;
+    const Category *category;
+    CategoryResult result;
+
+    active_count = (int)category_active_count(categories);
+    if (active_count == 0) {
+        printf("No active categories available.\n");
+        return 1;
+    }
+
+    printf("\n------------- DEACTIVATE CATEGORY -------------\n");
+    for (int index = 0; index < active_count; index++) {
+        category = category_find_active_by_index(
+            categories,
+            (size_t)index
+        );
+        printf("[%d] %s\n", category->id, category->name);
+    }
+    printf("[0] Cancel\n");
+    printf("Category ID: ");
+
+    if (read_line(input, sizeof(input)) <= 0
+        || !parse_menu_choice(input, &choice)) {
+        printf("Invalid category ID.\n");
+        return 1;
+    }
+
+    if (choice == 0) {
+        return 1;
+    }
+
+    result = category_deactivate(categories, choice);
+    if (result == CATEGORY_SUCCESS) {
+        printf("Category deactivated successfully.\n");
+    } else {
+        print_deactivation_error(result);
+    }
+
+    return 1;
+}
+
 static void manage_categories(CategoryList *categories)
 {
     char input[100];
@@ -169,8 +227,9 @@ static void manage_categories(CategoryList *categories)
     while (running) {
         printf("\n[1] Create Category\n");
         printf("[2] View Categories\n");
+        printf("[3] Deactivate Category\n");
         printf("[0] Back\n\n");
-        printf("Choice (0-2):\n");
+        printf("Choice (0-3):\n");
         printf("> ");
 
         if (read_line(input, sizeof(input)) <= 0) {
@@ -180,8 +239,8 @@ static void manage_categories(CategoryList *categories)
 
         if (!parse_menu_choice(input, &choice)
             || choice < 0
-            || choice > 2) {
-            printf("Invalid choice. Please enter a number from 0 to 2.\n");
+            || choice > 3) {
+            printf("Invalid choice. Please enter a number from 0 to 3.\n");
             continue;
         }
 
@@ -194,6 +253,12 @@ static void manage_categories(CategoryList *categories)
 
         case 2:
             view_categories(categories);
+            break;
+
+        case 3:
+            if (!deactivate_category(categories)) {
+                running = 0;
+            }
             break;
 
         case 0:

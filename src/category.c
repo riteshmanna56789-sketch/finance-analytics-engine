@@ -124,6 +124,33 @@ CategoryResult category_create(CategoryList *list, const char *name)
     return category_list_add(list, category);
 }
 
+CategoryResult category_deactivate(CategoryList *list, int category_id)
+{
+    Category *category = NULL;
+
+    if (list == NULL || category_id < 1) {
+        return CATEGORY_INVALID_INPUT;
+    }
+
+    for (size_t index = 0; index < list->size; index++) {
+        if (list->items[index].id == category_id) {
+            category = &list->items[index];
+            break;
+        }
+    }
+
+    if (category == NULL) {
+        return CATEGORY_NOT_FOUND;
+    }
+
+    if (!category->is_active) {
+        return CATEGORY_ALREADY_INACTIVE;
+    }
+
+    category->is_active = 0;
+    return CATEGORY_SUCCESS;
+}
+
 const Category *category_find_by_id(const CategoryList *list, int id)
 {
     if (list == NULL) {
