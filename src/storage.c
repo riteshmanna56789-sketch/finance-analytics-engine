@@ -9,7 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char *STORAGE_HEADER = "FAE_STORAGE 1";
+/* Version 2 persists the expense ID high-water mark. Version 1 remains loadable. */
+static const char *STORAGE_HEADER = "FAE_STORAGE 2";
 static const size_t MAX_LINE_LENGTH = 4096;
 
 static int write_line(FILE *file, const char *text)
@@ -276,6 +277,7 @@ StorageResult storage_save(
     }
 
     if (!write_line(file, STORAGE_HEADER)
+        || fprintf(file, "NEXT_EXPENSE_ID %d\n", expenses->next_id) < 0
         || fprintf(file, "CATEGORIES %zu\n", categories->size) < 0) {
         result = STORAGE_FILE_ERROR;
     }
@@ -356,6 +358,8 @@ StorageResult storage_load(
     size_t field_count = 1;
     size_t category_count;
     size_t expense_count;
+    int persisted_next_id = 1;
+    int is_legacy_format = 0;
     CategoryList loaded_categories;
     ExpenseList loaded_expenses;
     StorageResult result = STORAGE_SUCCESS;
@@ -372,8 +376,24 @@ StorageResult storage_load(
     category_list_init(&loaded_categories);
     expense_list_init(&loaded_expenses);
 
-    if (read_line(file, line, sizeof(line)) != 1
-        || strcmp(line, STORAGE_HEADER) != 0) {
+    if (read_line(file, line, sizeof(line)) != 1) {
+        result = STORAGE_INVALID_DATA;
+    } else if (strcmp(line, "FAE_STORAGE 1") == 0) {
+        is_legacy_format = 1;
+    } else if (strcmp(line, STORAGE_HEADER) != 0) {
+        result = STORAGE_INVALID_DATA;
+    }
+
+    if (result == STORAGE_SUCCESS && !is_legacy_format
+        && (read_line(file, line, sizeof(line)) != 1
+            || !parse_record_header(
+                line,
+                "NEXT_EXPENSE_ID",
+                &field_count,
+                fields
+            )
+            || !parse_int(fields[0], &persisted_next_id)
+            || persisted_next_id < 1)) {
         result = STORAGE_INVALID_DATA;
     }
 
@@ -405,6 +425,15 @@ StorageResult storage_load(
     if (result == STORAGE_SUCCESS
         && read_line(file, line, sizeof(line)) != 0) {
         result = STORAGE_INVALID_DATA;
+    }
+
+    if (result == STORAGE_SUCCESS && !is_legacy_format
+        && persisted_next_id < loaded_expenses.next_id) {
+        result = STORAGE_INVALID_DATA;
+    }
+
+    if (result == STORAGE_SUCCESS && !is_legacy_format) {
+        loaded_expenses.next_id = persisted_next_id;
     }
 
     if (fclose(file) != 0 && result == STORAGE_SUCCESS) {

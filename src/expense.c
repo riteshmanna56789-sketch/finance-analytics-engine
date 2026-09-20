@@ -23,6 +23,7 @@ void expense_list_init(ExpenseList *list)
     list->items = NULL;
     list->size = 0;
     list->capacity = 0;
+    list->next_id = 1;
 }
 
 ExpenseResult expense_list_add(ExpenseList *list, Expense expense)
@@ -50,6 +51,12 @@ ExpenseResult expense_list_add(ExpenseList *list, Expense expense)
 
     list->items[list->size] = expense;
     list->size++;
+
+    if (expense.id >= list->next_id && expense.id < INT_MAX) {
+        list->next_id = expense.id + 1;
+    } else if (expense.id == INT_MAX) {
+        list->next_id = INT_MAX;
+    }
 
     return EXPENSE_SUCCESS;
 }
@@ -102,23 +109,118 @@ ExpenseResult expense_create(
 
 ExpenseResult expense_next_id(const ExpenseList *list, int *next_id)
 {
-    int highest_id = 0;
-
     if (list == NULL || next_id == NULL) {
         return EXPENSE_INVALID_INPUT;
     }
 
     for (size_t index = 0; index < list->size; index++) {
-        if (list->items[index].id > highest_id) {
-            highest_id = list->items[index].id;
+        if (list->items[index].id == list->next_id) {
+            return EXPENSE_INVALID_INPUT;
         }
     }
 
-    if (highest_id == INT_MAX) {
+    if (list->next_id < 1 || list->next_id > INT_MAX) {
         return EXPENSE_INVALID_INPUT;
     }
 
-    *next_id = highest_id + 1;
+    *next_id = list->next_id;
+    return EXPENSE_SUCCESS;
+}
+
+const Expense *expense_find_by_id(
+    const ExpenseList *list,
+    int expense_id
+)
+{
+    if (list == NULL || expense_id < 1) {
+        return NULL;
+    }
+
+    for (size_t index = 0; index < list->size; index++) {
+        if (list->items[index].id == expense_id) {
+            return &list->items[index];
+        }
+    }
+
+    return NULL;
+}
+
+ExpenseResult expense_update(
+    ExpenseList *list,
+    const CategoryList *categories,
+    int expense_id,
+    int64_t amount_paise,
+    int category_id,
+    const char *note
+)
+{
+    Expense *expense = NULL;
+    const Category *category;
+    size_t note_length;
+
+    if (list == NULL || categories == NULL || expense_id < 1
+        || amount_paise <= 0 || category_id < 1 || note == NULL) {
+        return EXPENSE_INVALID_INPUT;
+    }
+
+    for (size_t index = 0; index < list->size; index++) {
+        if (list->items[index].id == expense_id) {
+            expense = &list->items[index];
+            break;
+        }
+    }
+
+    if (expense == NULL) {
+        return EXPENSE_NOT_FOUND;
+    }
+
+    note_length = strlen(note);
+    if (note_length >= sizeof(expense->note)) {
+        return EXPENSE_INVALID_INPUT;
+    }
+
+    category = category_find_by_id(categories, category_id);
+    if (category == NULL) {
+        return EXPENSE_CATEGORY_NOT_FOUND;
+    }
+    if (category_id != expense->category_id && !category->is_active) {
+        return EXPENSE_CATEGORY_INACTIVE;
+    }
+
+    expense->amount_paise = amount_paise;
+    expense->category_id = category_id;
+    memcpy(expense->note, note, note_length + 1);
+
+    return EXPENSE_SUCCESS;
+}
+
+ExpenseResult expense_delete(ExpenseList *list, int expense_id)
+{
+    size_t index;
+
+    if (list == NULL || expense_id < 1) {
+        return EXPENSE_INVALID_INPUT;
+    }
+
+    for (index = 0; index < list->size; index++) {
+        if (list->items[index].id == expense_id) {
+            break;
+        }
+    }
+
+    if (index == list->size) {
+        return EXPENSE_NOT_FOUND;
+    }
+
+    if (index + 1 < list->size) {
+        memmove(
+            &list->items[index],
+            &list->items[index + 1],
+            (list->size - index - 1) * sizeof(*list->items)
+        );
+    }
+    list->size--;
+
     return EXPENSE_SUCCESS;
 }
 
@@ -205,4 +307,5 @@ void expense_list_destroy(ExpenseList *list)
     list->items = NULL;
     list->size = 0;
     list->capacity = 0;
+    list->next_id = 1;
 }

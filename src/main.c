@@ -1,5 +1,6 @@
 #include "category.h"
 #include "expense.h"
+#include "expense_management.h"
 #include "analytics.h"
 #include "query.h"
 #include "sorting.h"
@@ -718,7 +719,7 @@ static void filter_by_time(
 }
 
 static void view_expenses(
-    const ExpenseList *expenses,
+    ExpenseList *expenses,
     const CategoryList *categories
 )
 {
@@ -733,8 +734,10 @@ static void view_expenses(
         printf("[3] Search by Amount\n");
         printf("[4] Filter by Time\n");
         printf("[5] Sort Expenses\n");
+        printf("[6] Edit Expense\n");
+        printf("[7] Delete Expense\n");
         printf("[0] Back\n");
-        printf("Choice (0-5):\n> ");
+        printf("Choice (0-7):\n> ");
 
         if (read_line(input, sizeof(input)) <= 0) {
             return;
@@ -742,9 +745,9 @@ static void view_expenses(
 
         if (!parse_menu_choice(input, &choice)
             || choice < 0
-            || choice > 5) {
+            || choice > 7) {
             printf(
-                "Invalid choice. Please enter a number from 0 to 5.\n"
+                "Invalid choice. Please enter a number from 0 to 7.\n"
             );
             continue;
         }
@@ -768,6 +771,14 @@ static void view_expenses(
 
         case 5:
             sort_expenses(expenses, categories);
+            break;
+
+        case 6:
+            expense_management_edit(expenses, categories);
+            break;
+
+        case 7:
+            expense_management_delete(expenses);
             break;
 
         case 0:
