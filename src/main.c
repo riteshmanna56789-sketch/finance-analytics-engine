@@ -718,6 +718,300 @@ static void filter_by_time(
     report_matches(match_count);
 }
 
+static int parse_query_date(const char *input, QueryDate *date)
+{
+    char extra;
+
+    return sscanf(
+        input,
+        "%d-%d-%d %c",
+        &date->year,
+        &date->month,
+        &date->day,
+        &extra
+    ) == 3;
+}
+
+static void display_query_results(
+    const ExpenseList *expenses,
+    const CategoryList *categories,
+    const QueryFilter *filter
+)
+{
+    size_t match_count = 0;
+    QueryResult result;
+
+    print_expense_header();
+    result = query_expenses(
+        expenses,
+        filter,
+        print_expense_row,
+        (void *)categories
+    );
+    if (result != QUERY_SUCCESS) {
+        printf("Invalid query filter.\n");
+        return;
+    }
+
+    query_expenses(expenses, filter, count_match, &match_count);
+    report_matches(match_count);
+}
+
+static int select_query_category(
+    const CategoryList *categories,
+    int *category_id
+)
+{
+    char input[100];
+    int choice;
+
+    printf("\nCategories:\n");
+    printf("[0] Any category\n");
+    for (size_t index = 0; index < categories->size; index++) {
+        printf("[%zu] %s%s\n",
+            index + 1,
+            categories->items[index].name,
+            categories->items[index].is_active ? "" : " (inactive)");
+    }
+    printf("Choice (0-%zu): ", categories->size);
+
+    if (read_line(input, sizeof(input)) <= 0
+        || !parse_menu_choice(input, &choice)
+        || choice < 0
+        || (size_t)choice > categories->size) {
+        printf("Invalid category selection.\n");
+        return 0;
+    }
+
+    if (choice == 0) {
+        return 1;
+    }
+
+    *category_id = categories->items[choice - 1].id;
+    return 1;
+}
+
+static int read_amount_range(
+    int64_t *minimum_amount_paise,
+    int64_t *maximum_amount_paise
+)
+{
+    char input[100];
+
+    printf("Minimum amount: Rs.");
+    if (read_line(input, sizeof(input)) <= 0) {
+        printf("Invalid minimum amount.\n");
+        return 0;
+    }
+    if (strcmp(input, "0") == 0 || strcmp(input, "0.0") == 0
+        || strcmp(input, "0.00") == 0) {
+        *minimum_amount_paise = 0;
+    } else if (expense_parse_amount_paise(
+            input,
+            minimum_amount_paise
+        ) != EXPENSE_SUCCESS) {
+        printf("Invalid minimum amount.\n");
+        return 0;
+    }
+
+    printf("Maximum amount: Rs.");
+    if (read_line(input, sizeof(input)) <= 0) {
+        printf("Invalid maximum amount.\n");
+        return 0;
+    }
+    if (strcmp(input, "0") == 0 || strcmp(input, "0.0") == 0
+        || strcmp(input, "0.00") == 0) {
+        *maximum_amount_paise = 0;
+    } else if (expense_parse_amount_paise(
+            input,
+            maximum_amount_paise
+        ) != EXPENSE_SUCCESS) {
+        printf("Invalid maximum amount.\n");
+        return 0;
+    }
+
+    if (*minimum_amount_paise > *maximum_amount_paise) {
+        printf("Minimum amount must not exceed maximum amount.\n");
+        return 0;
+    }
+
+    return 1;
+}
+
+static int read_date_range(QueryDate *start_date, QueryDate *end_date)
+{
+    char input[100];
+
+    printf("Start date (YYYY-MM-DD): ");
+    if (read_line(input, sizeof(input)) <= 0
+        || !parse_query_date(input, start_date)) {
+        printf("Invalid start date.\n");
+        return 0;
+    }
+
+    printf("End date (YYYY-MM-DD): ");
+    if (read_line(input, sizeof(input)) <= 0
+        || !parse_query_date(input, end_date)) {
+        printf("Invalid end date.\n");
+        return 0;
+    }
+
+    return 1;
+}
+
+static int search_by_note(
+    const ExpenseList *expenses,
+    const CategoryList *categories
+)
+{
+    char note[sizeof(((Expense *)0)->note)];
+    QueryFilter filter = {0};
+
+    printf("Note contains: ");
+    if (read_line(note, sizeof(note)) < 0) {
+        printf("Note search text is too long.\n");
+        return 1;
+    }
+
+    filter.note_enabled = 1;
+    filter.note = note;
+    display_query_results(expenses, categories, &filter);
+    return 1;
+}
+
+static int search_by_amount_range(
+    const ExpenseList *expenses,
+    const CategoryList *categories
+)
+{
+    QueryFilter filter = {0};
+
+    if (!read_amount_range(
+            &filter.minimum_amount_paise,
+            &filter.maximum_amount_paise)) {
+        return 1;
+    }
+
+    filter.amount_enabled = 1;
+    display_query_results(expenses, categories, &filter);
+    return 1;
+}
+
+static int search_by_date_range(
+    const ExpenseList *expenses,
+    const CategoryList *categories
+)
+{
+    QueryFilter filter = {0};
+
+    if (!read_date_range(&filter.start_date, &filter.end_date)) {
+        return 1;
+    }
+
+    filter.date_enabled = 1;
+    display_query_results(expenses, categories, &filter);
+    return 1;
+}
+
+static int search_by_combined_filters(
+    const ExpenseList *expenses,
+    const CategoryList *categories
+)
+{
+    char input[100];
+    char note[sizeof(((Expense *)0)->note)];
+    QueryFilter filter = {0};
+    int choice;
+
+    for (;;) {
+        printf("\nCombined filters (all selected filters are required):\n");
+        printf("[1] Category\n[2] Amount range\n[3] Date range\n[4] Note\n");
+        printf("[0] Run query\n");
+        printf("Choice (0-4): ");
+
+        if (read_line(input, sizeof(input)) <= 0
+            || !parse_menu_choice(input, &choice)
+            || choice < 0 || choice > 4) {
+            printf("Invalid filter selection.\n");
+            return 1;
+        }
+
+        if (choice == 0) {
+            break;
+        }
+
+        if (choice == 1) {
+            if (!select_query_category(categories, &filter.category_id)) {
+                return 1;
+            }
+            filter.category_enabled = filter.category_id > 0;
+        } else if (choice == 2) {
+            if (!read_amount_range(
+                    &filter.minimum_amount_paise,
+                    &filter.maximum_amount_paise)) {
+                return 1;
+            }
+            filter.amount_enabled = 1;
+        } else if (choice == 3) {
+            if (!read_date_range(&filter.start_date, &filter.end_date)) {
+                return 1;
+            }
+            filter.date_enabled = 1;
+        } else if (choice == 4) {
+            printf("Note contains: ");
+            if (read_line(note, sizeof(note)) < 0) {
+                printf("Note search text is too long.\n");
+                return 1;
+            }
+            filter.note_enabled = 1;
+            filter.note = note;
+        }
+    }
+
+    display_query_results(expenses, categories, &filter);
+    return 1;
+}
+
+static void advanced_queries(
+    const ExpenseList *expenses,
+    const CategoryList *categories
+)
+{
+    char input[100];
+    int choice;
+
+    printf("\n[1] Search by Note\n");
+    printf("[2] Amount Range\n");
+    printf("[3] Date Range\n");
+    printf("[4] Combined Filters\n");
+    printf("[0] Back\n");
+    printf("Choice (0-4): ");
+
+    if (read_line(input, sizeof(input)) <= 0
+        || !parse_menu_choice(input, &choice)
+        || choice < 0 || choice > 4) {
+        printf("Invalid query option.\n");
+        return;
+    }
+
+    switch (choice) {
+    case 1:
+        search_by_note(expenses, categories);
+        break;
+    case 2:
+        search_by_amount_range(expenses, categories);
+        break;
+    case 3:
+        search_by_date_range(expenses, categories);
+        break;
+    case 4:
+        search_by_combined_filters(expenses, categories);
+        break;
+    default:
+        break;
+    }
+}
+
 static void view_expenses(
     ExpenseList *expenses,
     const CategoryList *categories
@@ -734,10 +1028,11 @@ static void view_expenses(
         printf("[3] Search by Amount\n");
         printf("[4] Filter by Time\n");
         printf("[5] Sort Expenses\n");
-        printf("[6] Edit Expense\n");
-        printf("[7] Delete Expense\n");
+        printf("[6] More Queries\n");
+        printf("[7] Edit Expense\n");
+        printf("[8] Delete Expense\n");
         printf("[0] Back\n");
-        printf("Choice (0-7):\n> ");
+        printf("Choice (0-8):\n> ");
 
         if (read_line(input, sizeof(input)) <= 0) {
             return;
@@ -745,9 +1040,9 @@ static void view_expenses(
 
         if (!parse_menu_choice(input, &choice)
             || choice < 0
-            || choice > 7) {
+            || choice > 8) {
             printf(
-                "Invalid choice. Please enter a number from 0 to 7.\n"
+                "Invalid choice. Please enter a number from 0 to 8.\n"
             );
             continue;
         }
@@ -774,10 +1069,14 @@ static void view_expenses(
             break;
 
         case 6:
-            expense_management_edit(expenses, categories);
+            advanced_queries(expenses, categories);
             break;
 
         case 7:
+            expense_management_edit(expenses, categories);
+            break;
+
+        case 8:
             expense_management_delete(expenses);
             break;
 
