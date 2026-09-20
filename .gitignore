@@ -1,0 +1,9 @@
+﻿*.exe
+*.o
+
+data/*.dat
+data/*.tmp
+
+.vscode/
+
+*.tmp
