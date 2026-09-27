@@ -1155,6 +1155,507 @@ void analytics_trend_destroy(AnalyticsTrend *trend)
     initialize_trend(trend);
 }
 
+static uint64_t amount_magnitude(int64_t amount)
+{
+    if (amount >= 0) {
+        return (uint64_t)amount;
+    }
+    return (uint64_t)(-(amount + 1)) + 1;
+}
+
+static AnalyticsResult copy_category_insight_winners(
+    const AnalyticsCategoryBreakdown *breakdown,
+    int64_t highest,
+    int64_t lowest,
+    AnalyticsCategoryInsights *insights
+)
+{
+    for (size_t index = 0; index < breakdown->size; index++) {
+        if (breakdown->items[index].total_paise == highest) {
+            insights->highest_count++;
+        }
+        if (breakdown->items[index].total_paise == lowest) {
+            insights->lowest_count++;
+        }
+    }
+
+    if (insights->highest_count > SIZE_MAX / sizeof(*insights->highest_spending)
+        || insights->lowest_count > SIZE_MAX / sizeof(*insights->lowest_spending)) {
+        return ANALYTICS_MEMORY_ERROR;
+    }
+
+    if (insights->highest_count > 0) {
+        insights->highest_spending = malloc(
+            insights->highest_count * sizeof(*insights->highest_spending)
+        );
+        if (insights->highest_spending == NULL) {
+            return ANALYTICS_MEMORY_ERROR;
+        }
+    }
+    if (insights->lowest_count > 0) {
+        insights->lowest_spending = malloc(
+            insights->lowest_count * sizeof(*insights->lowest_spending)
+        );
+        if (insights->lowest_spending == NULL) {
+            return ANALYTICS_MEMORY_ERROR;
+        }
+    }
+
+    insights->highest_count = 0;
+    insights->lowest_count = 0;
+    for (size_t index = 0; index < breakdown->size; index++) {
+        const AnalyticsCategoryTotal *category = &breakdown->items[index];
+
+        if (category->total_paise == highest) {
+            insights->highest_spending[insights->highest_count++] = *category;
+        }
+        if (category->total_paise == lowest) {
+            insights->lowest_spending[insights->lowest_count++] = *category;
+        }
+    }
+    return ANALYTICS_SUCCESS;
+}
+
+AnalyticsResult analytics_extract_category_insights(
+    const AnalyticsCategoryBreakdown *breakdown,
+    AnalyticsCategoryInsights *insights
+)
+{
+    int64_t highest;
+    int64_t lowest;
+    int64_t category_total = 0;
+    size_t transaction_count = 0;
+    AnalyticsResult result;
+
+    if (insights == NULL) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+    memset(insights, 0, sizeof(*insights));
+    insights->highest_share_state =
+        ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE;
+
+    if (breakdown == NULL
+        || breakdown->size > breakdown->capacity
+        || breakdown->capacity > SIZE_MAX / sizeof(*breakdown->items)
+        || (breakdown->size > 0 && breakdown->items == NULL)
+        || breakdown->total_paise < 0) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    if (breakdown->size == 0) {
+        return breakdown->total_paise == 0
+                && breakdown->transaction_count == 0
+            ? ANALYTICS_SUCCESS
+            : ANALYTICS_INVALID_INPUT;
+    }
+
+    highest = breakdown->items[0].total_paise;
+    lowest = highest;
+    for (size_t index = 0; index < breakdown->size; index++) {
+        const AnalyticsCategoryTotal *category = &breakdown->items[index];
+
+        if (category->category_id < 1
+            || category->total_paise <= 0
+            || category->transaction_count == 0
+            || category->percentage_basis_points > 10000
+            || memchr(
+                category->category_name,
+                '\0',
+                sizeof(category->category_name)
+            ) == NULL) {
+            return ANALYTICS_INVALID_INPUT;
+        }
+        if (!add_amount(&category_total, category->total_paise)
+            || category->transaction_count > SIZE_MAX - transaction_count) {
+            return ANALYTICS_OVERFLOW;
+        }
+        transaction_count += category->transaction_count;
+        if (category->total_paise > highest) {
+            highest = category->total_paise;
+        }
+        if (category->total_paise < lowest) {
+            lowest = category->total_paise;
+        }
+    }
+
+    if (category_total != breakdown->total_paise
+        || transaction_count != breakdown->transaction_count) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    insights->total_paise = breakdown->total_paise;
+    insights->highest_share_state = ANALYTICS_PERCENTAGE_DEFINED;
+    result = copy_category_insight_winners(
+        breakdown,
+        highest,
+        lowest,
+        insights
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        analytics_category_insights_destroy(insights);
+        return result;
+    }
+    insights->total_paise = breakdown->total_paise;
+    insights->highest_share_state = ANALYTICS_PERCENTAGE_DEFINED;
+    return ANALYTICS_SUCCESS;
+}
+
+static AnalyticsResult copy_period_insight_winners(
+    const AnalyticsTrend *trend,
+    int64_t highest,
+    int64_t lowest,
+    AnalyticsPeriodInsights *insights
+)
+{
+    for (size_t index = 0; index < trend->period_count; index++) {
+        if (trend->periods[index].total_paise == highest) {
+            insights->highest_count++;
+        }
+        if (trend->periods[index].total_paise == lowest) {
+            insights->lowest_count++;
+        }
+    }
+
+    if (insights->highest_count > SIZE_MAX / sizeof(*insights->highest_spending)
+        || insights->lowest_count > SIZE_MAX / sizeof(*insights->lowest_spending)) {
+        return ANALYTICS_MEMORY_ERROR;
+    }
+
+    if (insights->highest_count > 0) {
+        insights->highest_spending = malloc(
+            insights->highest_count * sizeof(*insights->highest_spending)
+        );
+        if (insights->highest_spending == NULL) {
+            return ANALYTICS_MEMORY_ERROR;
+        }
+    }
+    if (insights->lowest_count > 0) {
+        insights->lowest_spending = malloc(
+            insights->lowest_count * sizeof(*insights->lowest_spending)
+        );
+        if (insights->lowest_spending == NULL) {
+            return ANALYTICS_MEMORY_ERROR;
+        }
+    }
+
+    insights->highest_count = 0;
+    insights->lowest_count = 0;
+    for (size_t index = 0; index < trend->period_count; index++) {
+        const AnalyticsTrendPeriod *period = &trend->periods[index];
+
+        if (period->total_paise == highest) {
+            insights->highest_spending[insights->highest_count++] = *period;
+        }
+        if (period->total_paise == lowest) {
+            insights->lowest_spending[insights->lowest_count++] = *period;
+        }
+    }
+    return ANALYTICS_SUCCESS;
+}
+
+AnalyticsResult analytics_extract_period_insights(
+    const AnalyticsTrend *trend,
+    AnalyticsPeriodInsights *insights
+)
+{
+    int64_t highest;
+    int64_t lowest;
+    int64_t total = 0;
+    AnalyticsResult result;
+
+    if (insights == NULL) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+    memset(insights, 0, sizeof(*insights));
+
+    if (trend == NULL || trend->periods == NULL || trend->period_count == 0
+        || trend->period_count > SIZE_MAX / sizeof(*trend->periods)
+        || trend->period_count > (size_t)INT64_MAX) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    highest = trend->periods[0].total_paise;
+    lowest = highest;
+    for (size_t index = 0; index < trend->period_count; index++) {
+        const AnalyticsTrendPeriod *period = &trend->periods[index];
+        int64_t expected_average;
+        int64_t expected_remainder;
+
+        if (period->year < 1 || period->year > 9999
+            || (period->month != 0
+                && (period->month < 1 || period->month > 12))
+            || period->total_paise < 0
+            || period->average_paise < 0
+            || period->average_remainder_paise < 0
+            || (period->transaction_count == 0
+                && (period->average_paise != 0
+                    || period->average_remainder_paise != 0
+                    || period->total_paise != 0))) {
+            return ANALYTICS_INVALID_INPUT;
+        }
+        if (!add_amount(&total, period->total_paise)) {
+            return ANALYTICS_OVERFLOW;
+        }
+
+        if (period->transaction_count == 0) {
+            expected_average = 0;
+            expected_remainder = 0;
+        } else if (period->transaction_count <= (size_t)INT64_MAX) {
+            int64_t divisor = (int64_t)period->transaction_count;
+            expected_average = period->total_paise / divisor;
+            expected_remainder = period->total_paise % divisor;
+        } else {
+            expected_average = 0;
+            expected_remainder = period->total_paise;
+        }
+        if (period->average_paise != expected_average
+            || period->average_remainder_paise != expected_remainder
+            || (period->transaction_count > 0
+                && (uint64_t)period->average_remainder_paise
+                    >= (uint64_t)period->transaction_count)) {
+            return ANALYTICS_INVALID_INPUT;
+        }
+
+        if (period->total_paise > highest) {
+            highest = period->total_paise;
+        }
+        if (period->total_paise < lowest) {
+            lowest = period->total_paise;
+        }
+    }
+
+    if (total != trend->total_paise
+        || trend->average_period_paise
+            != total / (int64_t)trend->period_count
+        || trend->average_period_remainder_paise
+            != total % (int64_t)trend->period_count) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    insights->total_paise = total;
+    insights->average_period_paise = trend->average_period_paise;
+    insights->average_period_remainder_paise =
+        trend->average_period_remainder_paise;
+    result = copy_period_insight_winners(
+        trend,
+        highest,
+        lowest,
+        insights
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        analytics_period_insights_destroy(insights);
+        return result;
+    }
+    insights->total_paise = total;
+    insights->average_period_paise = trend->average_period_paise;
+    insights->average_period_remainder_paise =
+        trend->average_period_remainder_paise;
+    return ANALYTICS_SUCCESS;
+}
+
+static AnalyticsResult copy_comparison_insight_winners(
+    const AnalyticsComparison *comparison,
+    uint64_t largest_absolute,
+    int64_t largest_increase,
+    int64_t largest_decrease,
+    AnalyticsComparisonInsights *insights
+)
+{
+    for (size_t index = 0; index < comparison->category_count; index++) {
+        const AnalyticsCategoryComparison *category =
+            &comparison->categories[index];
+        if (amount_magnitude(category->absolute_change_paise)
+            == largest_absolute) {
+            insights->largest_absolute_count++;
+        }
+        if (largest_increase > 0
+            && category->absolute_change_paise == largest_increase) {
+            insights->largest_increase_count++;
+        }
+        if (largest_decrease < 0
+            && category->absolute_change_paise == largest_decrease) {
+            insights->largest_decrease_count++;
+        }
+    }
+
+    if (insights->largest_absolute_count
+            > SIZE_MAX / sizeof(*insights->largest_absolute_change)
+        || insights->largest_increase_count
+            > SIZE_MAX / sizeof(*insights->largest_increase)
+        || insights->largest_decrease_count
+            > SIZE_MAX / sizeof(*insights->largest_decrease)) {
+        return ANALYTICS_MEMORY_ERROR;
+    }
+
+    if (insights->largest_absolute_count > 0) {
+        insights->largest_absolute_change = malloc(
+            insights->largest_absolute_count
+                * sizeof(*insights->largest_absolute_change)
+        );
+        if (insights->largest_absolute_change == NULL) {
+            return ANALYTICS_MEMORY_ERROR;
+        }
+    }
+    if (insights->largest_increase_count > 0) {
+        insights->largest_increase = malloc(
+            insights->largest_increase_count
+                * sizeof(*insights->largest_increase)
+        );
+        if (insights->largest_increase == NULL) {
+            return ANALYTICS_MEMORY_ERROR;
+        }
+    }
+    if (insights->largest_decrease_count > 0) {
+        insights->largest_decrease = malloc(
+            insights->largest_decrease_count
+                * sizeof(*insights->largest_decrease)
+        );
+        if (insights->largest_decrease == NULL) {
+            return ANALYTICS_MEMORY_ERROR;
+        }
+    }
+
+    insights->largest_absolute_count = 0;
+    insights->largest_increase_count = 0;
+    insights->largest_decrease_count = 0;
+    for (size_t index = 0; index < comparison->category_count; index++) {
+        const AnalyticsCategoryComparison *category =
+            &comparison->categories[index];
+        const int64_t change = category->absolute_change_paise;
+
+        if (amount_magnitude(change) == largest_absolute) {
+            insights->largest_absolute_change[
+                insights->largest_absolute_count++
+            ] = *category;
+        }
+        if (largest_increase > 0 && change == largest_increase) {
+            insights->largest_increase[
+                insights->largest_increase_count++
+            ] = *category;
+        }
+        if (largest_decrease < 0 && change == largest_decrease) {
+            insights->largest_decrease[
+                insights->largest_decrease_count++
+            ] = *category;
+        }
+    }
+    return ANALYTICS_SUCCESS;
+}
+
+AnalyticsResult analytics_extract_comparison_insights(
+    const AnalyticsComparison *comparison,
+    AnalyticsComparisonInsights *insights
+)
+{
+    uint64_t largest_absolute = 0;
+    int64_t largest_increase = 0;
+    int64_t largest_decrease = 0;
+    AnalyticsResult result;
+
+    if (insights == NULL) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+    memset(insights, 0, sizeof(*insights));
+
+    if (comparison == NULL
+        || comparison->category_count > comparison->category_capacity
+        || comparison->category_capacity
+            > SIZE_MAX / sizeof(*comparison->categories)
+        || (comparison->category_count > 0
+            && comparison->categories == NULL)) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    for (size_t index = 0; index < comparison->category_count; index++) {
+        const AnalyticsCategoryComparison *category =
+            &comparison->categories[index];
+        int64_t expected_change;
+        uint64_t magnitude;
+
+        if (category->category_id < 1
+            || category->period_a_total_paise < 0
+            || category->period_b_total_paise < 0
+            || category->period_a_percentage_basis_points > 10000
+            || category->period_b_percentage_basis_points > 10000
+            || memchr(
+                category->category_name,
+                '\0',
+                sizeof(category->category_name)
+            ) == NULL
+            || !subtract_amounts(
+                category->period_b_total_paise,
+                category->period_a_total_paise,
+                &expected_change
+            )
+            || category->absolute_change_paise != expected_change) {
+            return ANALYTICS_INVALID_INPUT;
+        }
+
+        magnitude = amount_magnitude(category->absolute_change_paise);
+        if (index == 0 || magnitude > largest_absolute) {
+            largest_absolute = magnitude;
+        }
+        if (category->absolute_change_paise > largest_increase) {
+            largest_increase = category->absolute_change_paise;
+        }
+        if (category->absolute_change_paise < largest_decrease) {
+            largest_decrease = category->absolute_change_paise;
+        }
+    }
+
+    result = copy_comparison_insight_winners(
+        comparison,
+        largest_absolute,
+        largest_increase,
+        largest_decrease,
+        insights
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        analytics_comparison_insights_destroy(insights);
+    }
+    return result;
+}
+
+void analytics_category_insights_destroy(
+    AnalyticsCategoryInsights *insights
+)
+{
+    if (insights == NULL) {
+        return;
+    }
+
+    free(insights->highest_spending);
+    free(insights->lowest_spending);
+    memset(insights, 0, sizeof(*insights));
+    insights->highest_share_state =
+        ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE;
+}
+
+void analytics_period_insights_destroy(AnalyticsPeriodInsights *insights)
+{
+    if (insights == NULL) {
+        return;
+    }
+
+    free(insights->highest_spending);
+    free(insights->lowest_spending);
+    memset(insights, 0, sizeof(*insights));
+}
+
+void analytics_comparison_insights_destroy(
+    AnalyticsComparisonInsights *insights
+)
+{
+    if (insights == NULL) {
+        return;
+    }
+
+    free(insights->largest_absolute_change);
+    free(insights->largest_increase);
+    free(insights->largest_decrease);
+    memset(insights, 0, sizeof(*insights));
+}
+
 void analytics_summary_destroy(AnalyticsSummary *summary)
 {
     if (summary == NULL) {

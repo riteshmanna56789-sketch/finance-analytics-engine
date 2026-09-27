@@ -347,6 +347,105 @@ static void show_category_breakdown(
     analytics_category_breakdown_destroy(&breakdown);
 }
 
+static void print_category_insight_group(
+    const char *label,
+    const AnalyticsCategoryTotal *categories,
+    size_t count,
+    int show_share
+)
+{
+    printf("%s", label);
+    if (count > 1) {
+        printf(" (tie):\n");
+    } else if (count == 1) {
+        printf(":\n");
+    } else {
+        printf(": none\n");
+        return;
+    }
+
+    for (size_t index = 0; index < count; index++) {
+        const AnalyticsCategoryTotal *category = &categories[index];
+        printf("  %s (ID %d) - ", category->category_name, category->category_id);
+        print_amount(category->total_paise);
+        if (show_share) {
+            printf(
+                " - %u.%02u%% of total",
+                category->percentage_basis_points / 100,
+                category->percentage_basis_points % 100
+            );
+        }
+        printf("\n");
+    }
+}
+
+static void show_category_insights(
+    const ExpenseList *expenses,
+    const CategoryList *categories
+)
+{
+    AnalyticsPeriod period = {0};
+    AnalyticsCategoryBreakdown breakdown;
+    AnalyticsCategoryInsights insights;
+    AnalyticsResult result;
+
+    if (!select_category_period(&period)) {
+        return;
+    }
+
+    result = analytics_calculate_category_breakdown(
+        expenses,
+        categories,
+        &period,
+        &breakdown
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        if (result == ANALYTICS_INVALID_CATEGORY) {
+            printf("Unable to calculate insights: an expense references an unknown category.\n");
+        } else if (result == ANALYTICS_MEMORY_ERROR) {
+            printf("Unable to calculate category insights: memory allocation failed.\n");
+        } else if (result == ANALYTICS_OVERFLOW) {
+            printf("Unable to calculate category insights: total overflow.\n");
+        } else {
+            printf("Unable to calculate category insights: invalid input.\n");
+        }
+        return;
+    }
+
+    result = analytics_extract_category_insights(&breakdown, &insights);
+    if (result != ANALYTICS_SUCCESS) {
+        analytics_category_breakdown_destroy(&breakdown);
+        printf(
+            result == ANALYTICS_MEMORY_ERROR
+                ? "Unable to calculate category insights: memory allocation failed.\n"
+                : "Unable to calculate category insights: invalid analytics result.\n"
+        );
+        return;
+    }
+
+    printf("\nCategory Insights\n");
+    if (insights.highest_count == 0) {
+        printf("No category data for the selected period.\n");
+        printf("Highest category share: undefined because spending is zero.\n");
+    } else {
+        print_category_insight_group(
+            "Highest-spending category",
+            insights.highest_spending,
+            insights.highest_count,
+            1
+        );
+        print_category_insight_group(
+            "Lowest-spending category among categories with transactions",
+            insights.lowest_spending,
+            insights.lowest_count,
+            0
+        );
+    }
+
+    analytics_category_insights_destroy(&insights);
+    analytics_category_breakdown_destroy(&breakdown);
+}
+
 static void show_daily_summary(const ExpenseList *expenses)
 {
     AnalyticsSummary summary;
@@ -653,6 +752,118 @@ static void show_comparison_menu(
     }
 }
 
+static void print_comparison_insight_group(
+    const char *label,
+    const AnalyticsCategoryComparison *categories,
+    size_t count
+)
+{
+    printf("%s", label);
+    if (count > 1) {
+        printf(" (tie):\n");
+    } else if (count == 1) {
+        printf(":\n");
+    } else {
+        printf(": none\n");
+        return;
+    }
+
+    for (size_t index = 0; index < count; index++) {
+        const AnalyticsCategoryComparison *category = &categories[index];
+        printf("  %s (ID %d) - ", category->category_name, category->category_id);
+        print_signed_amount(category->absolute_change_paise);
+        printf("\n");
+    }
+}
+
+static void show_comparison_insights(
+    const ExpenseList *expenses,
+    const CategoryList *categories
+)
+{
+    AnalyticsPeriod period_a = {0};
+    AnalyticsPeriod period_b = {0};
+    AnalyticsComparison comparison;
+    AnalyticsComparisonInsights insights;
+    AnalyticsResult result;
+    int comparison_type;
+
+    printf("\nComparison Insight Periods\n");
+    printf("[1] Month vs Month\n");
+    printf("[2] Year vs Year\n");
+    printf("[3] Date Range vs Date Range\n");
+    if (!read_integer("Choice (1-3): ", &comparison_type)
+        || comparison_type < 1 || comparison_type > 3) {
+        printf("Invalid comparison choice.\n");
+        return;
+    }
+
+    if (!read_comparison_period(comparison_type, "Period A", &period_a)
+        || !read_comparison_period(comparison_type, "Period B", &period_b)) {
+        printf("Invalid comparison period.\n");
+        return;
+    }
+
+    result = analytics_compare_periods(
+        expenses,
+        categories,
+        &period_a,
+        &period_b,
+        &comparison
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        if (result == ANALYTICS_INVALID_CATEGORY) {
+            printf("Unable to calculate comparison insights: unknown category reference.\n");
+        } else if (result == ANALYTICS_MEMORY_ERROR) {
+            printf("Unable to calculate comparison insights: memory allocation failed.\n");
+        } else if (result == ANALYTICS_OVERFLOW) {
+            printf("Unable to calculate comparison insights: amount overflow.\n");
+        } else {
+            printf("Unable to calculate comparison insights: invalid input.\n");
+        }
+        return;
+    }
+
+    result = analytics_extract_comparison_insights(&comparison, &insights);
+    if (result != ANALYTICS_SUCCESS) {
+        analytics_comparison_destroy(&comparison);
+        if (result == ANALYTICS_MEMORY_ERROR) {
+            printf("Unable to derive comparison insights: memory allocation failed.\n");
+        } else {
+            printf("Unable to derive comparison insights: invalid analytics result.\n");
+        }
+        return;
+    }
+
+    printf("\nCategory Comparison Insights (Period B - Period A)\n");
+    print_comparison_insight_group(
+        "Largest absolute category change",
+        insights.largest_absolute_change,
+        insights.largest_absolute_count
+    );
+    if (insights.largest_increase_count == 0) {
+        printf("No category increases between the selected periods.\n");
+    } else {
+        print_comparison_insight_group(
+            "Largest category increase",
+            insights.largest_increase,
+            insights.largest_increase_count
+        );
+    }
+    if (insights.largest_decrease_count == 0) {
+        printf("No category decreases between the selected periods.\n");
+    } else {
+        print_comparison_insight_group(
+            "Largest category decrease",
+            insights.largest_decrease,
+            insights.largest_decrease_count
+        );
+    }
+
+    analytics_comparison_insights_destroy(&insights);
+    analytics_comparison_destroy(&comparison);
+}
+
 static void print_trend_period(const AnalyticsTrendPeriod *period, int monthly)
 {
     if (monthly) {
@@ -683,31 +894,28 @@ static void print_trend_period(const AnalyticsTrendPeriod *period, int monthly)
     printf("\n");
 }
 
-static void show_trend(
+static int calculate_trend_from_input(
     const ExpenseList *expenses,
-    AnalyticsTrendType type
+    AnalyticsTrendType type,
+    AnalyticsTrend *trend
 )
 {
-    AnalyticsTrend trend;
-    AnalyticsResult result;
     int year;
     int month = 0;
     int period_count;
     int monthly = type == ANALYTICS_TREND_MONTHLY;
-    const char *title = monthly
-        ? "Monthly Spending Trend"
-        : "Yearly Spending Trend";
+    AnalyticsResult result;
 
     if (!read_integer("Starting year (1-9999): ", &year)
         || year < 1 || year > 9999) {
         printf("Invalid starting year.\n");
-        return;
+        return 0;
     }
     if (monthly
         && (!read_integer("Starting month (1-12): ", &month)
             || month < 1 || month > 12)) {
         printf("Invalid starting month.\n");
-        return;
+        return 0;
     }
 
     printf(
@@ -722,7 +930,7 @@ static void show_trend(
         )
         || period_count <= 0) {
         printf("Invalid period count.\n");
-        return;
+        return 0;
     }
 
     result = analytics_calculate_trend(
@@ -731,22 +939,155 @@ static void show_trend(
         year,
         month,
         (size_t)period_count,
-        &trend
+        trend
     );
     if (result == ANALYTICS_INVALID_INPUT) {
         printf("Invalid trend range or expense data.\n");
-        return;
-    }
-    if (result == ANALYTICS_MEMORY_ERROR) {
+    } else if (result == ANALYTICS_MEMORY_ERROR) {
         printf("Unable to calculate trend: memory allocation failed.\n");
-        return;
-    }
-    if (result == ANALYTICS_OVERFLOW) {
+    } else if (result == ANALYTICS_OVERFLOW) {
         printf("Unable to calculate trend: an amount would overflow.\n");
+    } else if (result != ANALYTICS_SUCCESS) {
+        printf("Unable to calculate trend.\n");
+    }
+    return result == ANALYTICS_SUCCESS;
+}
+
+static void print_period_insight_group(
+    const char *label,
+    const AnalyticsTrendPeriod *periods,
+    size_t count
+)
+{
+    printf("%s", label);
+    if (count > 1) {
+        printf(" (tie):\n");
+    } else if (count == 1) {
+        printf(":\n");
+    } else {
+        printf(": none\n");
         return;
     }
-    if (result != ANALYTICS_SUCCESS) {
-        printf("Unable to calculate trend.\n");
+
+    for (size_t index = 0; index < count; index++) {
+        print_trend_period(&periods[index], periods[index].month != 0);
+    }
+}
+
+static void show_period_insights(
+    const ExpenseList *expenses,
+    AnalyticsTrendType type
+)
+{
+    AnalyticsTrend trend;
+    AnalyticsPeriodInsights insights;
+    int monthly = type == ANALYTICS_TREND_MONTHLY;
+
+    if (!calculate_trend_from_input(expenses, type, &trend)) {
+        return;
+    }
+
+    {
+        AnalyticsResult result = analytics_extract_period_insights(
+            &trend,
+            &insights
+        );
+        if (result != ANALYTICS_SUCCESS) {
+            analytics_trend_destroy(&trend);
+            if (result == ANALYTICS_MEMORY_ERROR) {
+                printf("Unable to derive period insights: memory allocation failed.\n");
+            } else {
+                printf("Unable to derive period insights: invalid trend result.\n");
+            }
+            return;
+        }
+    }
+
+    printf("\n%s Period Insights\n", monthly ? "Monthly" : "Yearly");
+    print_period_insight_group(
+        "Highest-spending period",
+        insights.highest_spending,
+        insights.highest_count
+    );
+    print_period_insight_group(
+        "Lowest-spending period",
+        insights.lowest_spending,
+        insights.lowest_count
+    );
+    printf("Total spending across periods: ");
+    print_amount(insights.total_paise);
+    printf("\nAverage spending per period: ");
+    print_amount(insights.average_period_paise);
+    if (insights.average_period_remainder_paise != 0) {
+        printf(
+            " + %" PRId64 "/%zu paise",
+            insights.average_period_remainder_paise,
+            trend.period_count
+        );
+    }
+    printf("\n");
+    analytics_period_insights_destroy(&insights);
+    analytics_trend_destroy(&trend);
+}
+
+static void show_period_insights_menu(const ExpenseList *expenses)
+{
+    int choice;
+
+    printf("\nPeriod Insights\n");
+    printf("[1] Monthly Period Insights\n");
+    printf("[2] Yearly Period Insights\n");
+    printf("[0] Back\n");
+    if (!read_integer("Choice (0-2): ", &choice)
+        || choice < 0 || choice > 2) {
+        printf("Invalid period insight choice.\n");
+        return;
+    }
+    if (choice == 1) {
+        show_period_insights(expenses, ANALYTICS_TREND_MONTHLY);
+    } else if (choice == 2) {
+        show_period_insights(expenses, ANALYTICS_TREND_YEARLY);
+    }
+}
+
+static void show_financial_insights(
+    const ExpenseList *expenses,
+    const CategoryList *categories
+)
+{
+    int choice;
+
+    printf("\nFinancial Insights\n");
+    printf("[1] Category Insights\n");
+    printf("[2] Period Insights\n");
+    printf("[3] Comparison Insights\n");
+    printf("[0] Back\n");
+    if (!read_integer("Choice (0-3): ", &choice)
+        || choice < 0 || choice > 3) {
+        printf("Invalid insight choice.\n");
+        return;
+    }
+    if (choice == 1) {
+        show_category_insights(expenses, categories);
+    } else if (choice == 2) {
+        show_period_insights_menu(expenses);
+    } else if (choice == 3) {
+        show_comparison_insights(expenses, categories);
+    }
+}
+
+static void show_trend(
+    const ExpenseList *expenses,
+    AnalyticsTrendType type
+)
+{
+    AnalyticsTrend trend;
+    int monthly = type == ANALYTICS_TREND_MONTHLY;
+    const char *title = monthly
+        ? "Monthly Spending Trend"
+        : "Yearly Spending Trend";
+
+    if (!calculate_trend_from_input(expenses, type, &trend)) {
         return;
     }
 
@@ -830,8 +1171,9 @@ void analytics_ui_show_summary(
         printf("[6] Custom Date Range\n");
         printf("[7] Compare Periods\n");
         printf("[8] Spending Trends\n");
+        printf("[9] Financial Insights\n");
         printf("[0] Back\n");
-        printf("Choice (0-8): ");
+        printf("Choice (0-9): ");
 
         read_result = read_input(input, sizeof(input));
         if (read_result == 0) {
@@ -839,7 +1181,7 @@ void analytics_ui_show_summary(
             return;
         }
         if (read_result < 0) {
-            printf("Choice is too long. Enter a number from 0 to 8.\n");
+            printf("Choice is too long. Enter a number from 0 to 9.\n");
             continue;
         }
 
@@ -853,8 +1195,8 @@ void analytics_ui_show_summary(
                 end++;
             }
             if (input == end || errno == ERANGE || *end != '\0'
-                || parsed < 0 || parsed > 8) {
-                printf("Invalid choice. Enter a number from 0 to 8.\n");
+                || parsed < 0 || parsed > 9) {
+                printf("Invalid choice. Enter a number from 0 to 9.\n");
                 continue;
             }
             choice = (int)parsed;
@@ -884,6 +1226,9 @@ void analytics_ui_show_summary(
             break;
         case 8:
             show_trend_menu(expenses);
+            break;
+        case 9:
+            show_financial_insights(expenses, categories);
             break;
         case 0:
             running = 0;

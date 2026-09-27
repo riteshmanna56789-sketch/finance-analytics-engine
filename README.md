@@ -39,6 +39,12 @@ the same local CLI architecture.
 - Analyze consecutive monthly or yearly spending trends, including each
   period's total, transaction count, and average, plus sequence-wide total,
   average, highest/lowest period, transition counts, and first-to-last change.
+- View objective financial insights for selected periods, including tied
+  highest/lowest categories and periods, highest category share, average
+  spending per trend period, and the largest absolute category change,
+  increase, or decrease between compared periods. Empty results and
+  zero-baseline shares are reported explicitly; the application does not
+  generate subjective financial advice.
 - Validate user input and stored records, including amounts, IDs, categories,
   dates, and string boundaries.
 - Run assertion-based hardening tests for data operations, querying, sorting,
@@ -72,9 +78,12 @@ Major module responsibilities:
   percentage changes without subjective assessments. Trend analysis reuses
   period summaries, generates bounded consecutive periods, and reports
   sequence-level metrics without interpreting the results as advice.
+  Derived insight functions operate on existing breakdown, trend, and
+  comparison results, preserve all ties in source order, and own only their
+  returned winner arrays until their corresponding destroy functions run.
 - **analytics_ui** (`analytics_ui.h`, `analytics_ui.c`): presentation and
-  input for overall, time-based, and category-based spending summaries,
-  keeping analytics UI out of `main`.
+  input for overall, time-based, category-based, trend, comparison, and
+  objective financial insights, keeping analytics UI out of `main`.
 - **query** (`query.h`, `query.c`): category, amount, time, note, date/amount
   range, and combined expense queries.
 - **sorting** (`sorting.h`, `sorting.c`): stable sorting of a temporary

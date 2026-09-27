@@ -1413,6 +1413,267 @@ int main(void)
         remove(temporary_file);
     }
 
+    {
+        CategoryList insight_categories;
+        ExpenseList insight_expenses;
+        ExpenseList no_expenses;
+        ExpenseList invalid_reference_expenses;
+        AnalyticsCategoryBreakdown breakdown;
+        AnalyticsCategoryInsights category_insights;
+        AnalyticsTrend trend;
+        AnalyticsPeriodInsights period_insights;
+        AnalyticsComparison comparison;
+        AnalyticsComparisonInsights comparison_insights;
+        AnalyticsPeriod period_a = {0};
+        AnalyticsPeriod period_b = {0};
+        AnalyticsCategoryTotal overflowing_categories[2] = {0};
+        AnalyticsCategoryBreakdown overflowing_breakdown = {0};
+        AnalyticsTrendPeriod overflowing_periods[2] = {0};
+        AnalyticsTrend overflowing_trend = {0};
+
+        category_list_init(&insight_categories);
+        expense_list_init(&insight_expenses);
+        expense_list_init(&no_expenses);
+        expense_list_init(&invalid_reference_expenses);
+
+        assert(category_create(&insight_categories, "Alpha") == CATEGORY_SUCCESS);
+        assert(category_create(&insight_categories, "Beta") == CATEGORY_SUCCESS);
+        assert(category_create(&insight_categories, "Gamma") == CATEGORY_SUCCESS);
+        assert(category_deactivate(&insight_categories, 3) == CATEGORY_SUCCESS);
+
+        assert(expense_list_add(
+            &insight_expenses,
+            make_expense(1, 1, 2030, 1, 1, 1000, "Alpha A")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &insight_expenses,
+            make_expense(2, 2, 2030, 1, 1, 1000, "Beta A")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &insight_expenses,
+            make_expense(3, 3, 2030, 1, 1, 1500, "Gamma A")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &insight_expenses,
+            make_expense(4, 1, 2031, 1, 1, 1500, "Alpha B")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &insight_expenses,
+            make_expense(5, 2, 2031, 1, 1, 1500, "Beta B")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &insight_expenses,
+            make_expense(6, 3, 2031, 1, 1, 500, "Gamma B")
+        ) == EXPENSE_SUCCESS);
+
+        assert(analytics_calculate_category_breakdown(
+            &insight_expenses,
+            &insight_categories,
+            NULL,
+            &breakdown
+        ) == ANALYTICS_SUCCESS);
+        assert(analytics_extract_category_insights(
+            &breakdown,
+            &category_insights
+        ) == ANALYTICS_SUCCESS);
+        assert(category_insights.total_paise == 7000);
+        assert(category_insights.highest_share_state
+            == ANALYTICS_PERCENTAGE_DEFINED);
+        assert(category_insights.highest_count == 2);
+        assert(category_insights.highest_spending[0].category_id == 1);
+        assert(category_insights.highest_spending[1].category_id == 2);
+        assert(category_insights.highest_spending[0].total_paise == 2500);
+        assert(category_insights.highest_spending[0].percentage_basis_points
+            == 3571);
+        assert(category_insights.lowest_count == 1);
+        assert(category_insights.lowest_spending[0].category_id == 3);
+        assert(insight_categories.items[2].is_active == 0);
+        analytics_category_insights_destroy(&category_insights);
+        analytics_category_breakdown_destroy(&breakdown);
+
+        period_a.type = ANALYTICS_PERIOD_YEAR;
+        period_a.year = 2030;
+        period_b.type = ANALYTICS_PERIOD_YEAR;
+        period_b.year = 2031;
+        assert(analytics_compare_periods(
+            &insight_expenses,
+            &insight_categories,
+            &period_a,
+            &period_b,
+            &comparison
+        ) == ANALYTICS_SUCCESS);
+        assert(analytics_extract_comparison_insights(
+            &comparison,
+            &comparison_insights
+        ) == ANALYTICS_SUCCESS);
+        assert(comparison_insights.largest_absolute_count == 1);
+        assert(comparison_insights.largest_absolute_change[0].category_id == 3);
+        assert(comparison_insights.largest_absolute_change[0]
+            .absolute_change_paise == -1000);
+        assert(comparison_insights.largest_increase_count == 2);
+        assert(comparison_insights.largest_increase[0].category_id == 1);
+        assert(comparison_insights.largest_increase[1].category_id == 2);
+        assert(comparison_insights.largest_increase[0]
+            .absolute_change_paise == 500);
+        assert(comparison_insights.largest_decrease_count == 1);
+        assert(comparison_insights.largest_decrease[0].category_id == 3);
+        assert(comparison_insights.largest_decrease[0]
+            .absolute_change_paise == -1000);
+        analytics_comparison_insights_destroy(&comparison_insights);
+        analytics_comparison_destroy(&comparison);
+
+        assert(analytics_compare_periods(
+            &insight_expenses,
+            &insight_categories,
+            &period_a,
+            &period_a,
+            &comparison
+        ) == ANALYTICS_SUCCESS);
+        assert(analytics_extract_comparison_insights(
+            &comparison,
+            &comparison_insights
+        ) == ANALYTICS_SUCCESS);
+        assert(comparison_insights.largest_absolute_count == 3);
+        assert(comparison_insights.largest_increase_count == 0);
+        assert(comparison_insights.largest_decrease_count == 0);
+        analytics_comparison_insights_destroy(&comparison_insights);
+        analytics_comparison_destroy(&comparison);
+
+        assert(analytics_calculate_trend(
+            &insight_expenses,
+            ANALYTICS_TREND_YEARLY,
+            2030,
+            0,
+            3,
+            &trend
+        ) == ANALYTICS_SUCCESS);
+        assert(analytics_extract_period_insights(
+            &trend,
+            &period_insights
+        ) == ANALYTICS_SUCCESS);
+        assert(period_insights.highest_count == 2);
+        assert(period_insights.highest_spending[0].year == 2030);
+        assert(period_insights.highest_spending[1].year == 2031);
+        assert(period_insights.lowest_count == 1);
+        assert(period_insights.lowest_spending[0].year == 2032);
+        assert(period_insights.lowest_spending[0].total_paise == 0);
+        assert(period_insights.total_paise == 7000);
+        assert(period_insights.average_period_paise == 2333);
+        assert(period_insights.average_period_remainder_paise == 1);
+        analytics_period_insights_destroy(&period_insights);
+        analytics_trend_destroy(&trend);
+
+        assert(analytics_calculate_trend(
+            &no_expenses,
+            ANALYTICS_TREND_YEARLY,
+            2030,
+            0,
+            3,
+            &trend
+        ) == ANALYTICS_SUCCESS);
+        assert(analytics_extract_period_insights(
+            &trend,
+            &period_insights
+        ) == ANALYTICS_SUCCESS);
+        assert(period_insights.highest_count == 3);
+        assert(period_insights.lowest_count == 3);
+        assert(period_insights.total_paise == 0);
+        assert(period_insights.average_period_paise == 0);
+        analytics_period_insights_destroy(&period_insights);
+        analytics_trend_destroy(&trend);
+
+        assert(analytics_calculate_category_breakdown(
+            &no_expenses,
+            &insight_categories,
+            NULL,
+            &breakdown
+        ) == ANALYTICS_SUCCESS);
+        assert(analytics_extract_category_insights(
+            &breakdown,
+            &category_insights
+        ) == ANALYTICS_SUCCESS);
+        assert(category_insights.highest_count == 0);
+        assert(category_insights.lowest_count == 0);
+        assert(category_insights.total_paise == 0);
+        assert(category_insights.highest_share_state
+            == ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE);
+        analytics_category_insights_destroy(&category_insights);
+        analytics_category_breakdown_destroy(&breakdown);
+
+        period_a.type = ANALYTICS_PERIOD_YEAR;
+        period_a.year = 2040;
+        assert(analytics_calculate_category_breakdown(
+            &insight_expenses,
+            &insight_categories,
+            &period_a,
+            &breakdown
+        ) == ANALYTICS_SUCCESS);
+        assert(analytics_extract_category_insights(
+            &breakdown,
+            &category_insights
+        ) == ANALYTICS_SUCCESS);
+        assert(breakdown.transaction_count == 0);
+        assert(category_insights.highest_count == 0);
+        assert(category_insights.lowest_count == 0);
+        assert(category_insights.highest_share_state
+            == ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE);
+        analytics_category_insights_destroy(&category_insights);
+        analytics_category_breakdown_destroy(&breakdown);
+
+        assert(expense_list_add(
+            &invalid_reference_expenses,
+            make_expense(1, 999, 2030, 1, 1, 1, "invalid category")
+        ) == EXPENSE_SUCCESS);
+        assert(analytics_calculate_category_breakdown(
+            &invalid_reference_expenses,
+            &insight_categories,
+            NULL,
+            &breakdown
+        ) == ANALYTICS_INVALID_CATEGORY);
+
+        overflowing_categories[0].category_id = 1;
+        strcpy(overflowing_categories[0].category_name, "Alpha");
+        overflowing_categories[0].total_paise = INT64_MAX;
+        overflowing_categories[0].transaction_count = 1;
+        overflowing_categories[1].category_id = 2;
+        strcpy(overflowing_categories[1].category_name, "Beta");
+        overflowing_categories[1].total_paise = 1;
+        overflowing_categories[1].transaction_count = 1;
+        overflowing_breakdown.items = overflowing_categories;
+        overflowing_breakdown.size = 2;
+        overflowing_breakdown.capacity = 2;
+        overflowing_breakdown.total_paise = INT64_MAX;
+        overflowing_breakdown.transaction_count = 2;
+        assert(analytics_extract_category_insights(
+            &overflowing_breakdown,
+            &category_insights
+        ) == ANALYTICS_OVERFLOW);
+
+        overflowing_periods[0].year = 2030;
+        overflowing_periods[0].total_paise = INT64_MAX;
+        overflowing_periods[0].transaction_count = 1;
+        overflowing_periods[0].average_paise = INT64_MAX;
+        overflowing_periods[1].year = 2031;
+        overflowing_periods[1].total_paise = 1;
+        overflowing_periods[1].transaction_count = 1;
+        overflowing_periods[1].average_paise = 1;
+        overflowing_trend.periods = overflowing_periods;
+        overflowing_trend.period_count = 2;
+        overflowing_trend.total_paise = INT64_MAX;
+        assert(analytics_extract_period_insights(
+            &overflowing_trend,
+            &period_insights
+        ) == ANALYTICS_OVERFLOW);
+
+        analytics_category_insights_destroy(NULL);
+        analytics_period_insights_destroy(NULL);
+        analytics_comparison_insights_destroy(NULL);
+        expense_list_destroy(&invalid_reference_expenses);
+        expense_list_destroy(&no_expenses);
+        expense_list_destroy(&insight_expenses);
+        category_list_destroy(&insight_categories);
+    }
+
     category_list_destroy(&categories);
     category_list_destroy(&loaded_categories);
     category_list_destroy(&empty_categories);

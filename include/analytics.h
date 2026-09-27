@@ -124,6 +124,35 @@ typedef struct {
     AnalyticsPercentageChange first_to_last_percentage_change;
 } AnalyticsTrend;
 
+typedef struct {
+    AnalyticsCategoryTotal *highest_spending;
+    size_t highest_count;
+    AnalyticsCategoryTotal *lowest_spending;
+    size_t lowest_count;
+    int64_t total_paise;
+    /* Undefined when there is no category data; otherwise uses item shares. */
+    AnalyticsPercentageState highest_share_state;
+} AnalyticsCategoryInsights;
+
+typedef struct {
+    AnalyticsTrendPeriod *highest_spending;
+    size_t highest_count;
+    AnalyticsTrendPeriod *lowest_spending;
+    size_t lowest_count;
+    int64_t total_paise;
+    int64_t average_period_paise;
+    int64_t average_period_remainder_paise;
+} AnalyticsPeriodInsights;
+
+typedef struct {
+    AnalyticsCategoryComparison *largest_absolute_change;
+    size_t largest_absolute_count;
+    AnalyticsCategoryComparison *largest_increase;
+    size_t largest_increase_count;
+    AnalyticsCategoryComparison *largest_decrease;
+    size_t largest_decrease_count;
+} AnalyticsComparisonInsights;
+
 #define ANALYTICS_MAX_MONTHLY_TREND_PERIODS 1200
 #define ANALYTICS_MAX_YEARLY_TREND_PERIODS 200
 
@@ -223,6 +252,41 @@ AnalyticsResult analytics_calculate_trend(
 );
 
 void analytics_trend_destroy(AnalyticsTrend *trend);
+
+/*
+ * These derived-result functions consume existing analytics results, so they
+ * do not rescan expenses. Tied results are returned in source order. Their
+ * arrays are owned by the insight result and released by the matching
+ * destroy function. A zero category winner count means no category data; a
+ * zero comparison increase/decrease count means no category changed in that
+ * direction. Each extraction takes O(n) time and O(t) space, where n is the
+ * source result size and t is the number of tied winners across returned
+ * groups.
+ */
+AnalyticsResult analytics_extract_category_insights(
+    const AnalyticsCategoryBreakdown *breakdown,
+    AnalyticsCategoryInsights *insights
+);
+
+AnalyticsResult analytics_extract_period_insights(
+    const AnalyticsTrend *trend,
+    AnalyticsPeriodInsights *insights
+);
+
+AnalyticsResult analytics_extract_comparison_insights(
+    const AnalyticsComparison *comparison,
+    AnalyticsComparisonInsights *insights
+);
+
+void analytics_category_insights_destroy(
+    AnalyticsCategoryInsights *insights
+);
+
+void analytics_period_insights_destroy(AnalyticsPeriodInsights *insights);
+
+void analytics_comparison_insights_destroy(
+    AnalyticsComparisonInsights *insights
+);
 
 void analytics_summary_destroy(AnalyticsSummary *summary);
 
