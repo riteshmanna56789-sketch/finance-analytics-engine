@@ -61,6 +61,40 @@ typedef struct {
     size_t transaction_count;
 } AnalyticsCategoryBreakdown;
 
+typedef enum {
+    ANALYTICS_PERCENTAGE_DEFINED = 0,
+    ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE
+} AnalyticsPercentageState;
+
+typedef struct {
+    AnalyticsPercentageState state;
+    int is_negative;
+    uint64_t basis_points;
+} AnalyticsPercentageChange;
+
+typedef struct {
+    int category_id;
+    char category_name[sizeof(((Category *)0)->name)];
+    int64_t period_a_total_paise;
+    int64_t period_b_total_paise;
+    int64_t absolute_change_paise;
+    size_t period_a_transaction_count;
+    size_t period_b_transaction_count;
+    unsigned int period_a_percentage_basis_points;
+    unsigned int period_b_percentage_basis_points;
+    AnalyticsPercentageChange percentage_change;
+} AnalyticsCategoryComparison;
+
+typedef struct {
+    AnalyticsSummary period_a;
+    AnalyticsSummary period_b;
+    int64_t absolute_change_paise;
+    AnalyticsPercentageChange percentage_change;
+    AnalyticsCategoryComparison *categories;
+    size_t category_count;
+    size_t category_capacity;
+} AnalyticsComparison;
+
 /*
  * For non-empty datasets, the average is represented exactly as
  * average_paise + average_remainder_paise / transaction_count paise.
@@ -123,6 +157,23 @@ AnalyticsResult analytics_calculate_category_breakdown(
 void analytics_category_breakdown_destroy(
     AnalyticsCategoryBreakdown *breakdown
 );
+
+/*
+ * Computes period summaries using existing analytics primitives, then joins
+ * category results by stable category ID. The result owns its embedded
+ * summaries and category array until analytics_comparison_destroy().
+ * Percentage changes use rounded basis points; if that derived value cannot
+ * fit in uint64_t basis points, ANALYTICS_OVERFLOW is returned.
+ */
+AnalyticsResult analytics_compare_periods(
+    const ExpenseList *expenses,
+    const CategoryList *categories,
+    const AnalyticsPeriod *period_a,
+    const AnalyticsPeriod *period_b,
+    AnalyticsComparison *comparison
+);
+
+void analytics_comparison_destroy(AnalyticsComparison *comparison);
 
 void analytics_summary_destroy(AnalyticsSummary *summary);
 

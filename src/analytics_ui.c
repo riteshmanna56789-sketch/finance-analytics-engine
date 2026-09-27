@@ -456,6 +456,203 @@ static void show_date_range_summary(const ExpenseList *expenses)
     );
 }
 
+static int read_comparison_period(
+    int comparison_type,
+    const char *label,
+    AnalyticsPeriod *period
+)
+{
+    if (comparison_type == 1) {
+        period->type = ANALYTICS_PERIOD_MONTH;
+        printf("%s\n", label);
+        return read_integer("Year (1-9999): ", &period->year)
+            && period->year >= 1 && period->year <= 9999
+            && read_integer("Month (1-12): ", &period->month)
+            && period->month >= 1 && period->month <= 12;
+    }
+
+    if (comparison_type == 2) {
+        period->type = ANALYTICS_PERIOD_YEAR;
+        printf("%s\n", label);
+        return read_integer("Year (1-9999): ", &period->year)
+            && period->year >= 1 && period->year <= 9999;
+    }
+
+    period->type = ANALYTICS_PERIOD_DATE_RANGE;
+    printf("%s\n", label);
+    if (!read_date("Start date (YYYY-MM-DD): ", &period->start_date)
+        || !read_date("End date (YYYY-MM-DD): ", &period->end_date)) {
+        return 0;
+    }
+    return period->start_date.year < period->end_date.year
+        || (period->start_date.year == period->end_date.year
+            && (period->start_date.month < period->end_date.month
+                || (period->start_date.month == period->end_date.month
+                    && period->start_date.day <= period->end_date.day)));
+}
+
+static void print_signed_amount(int64_t amount_paise)
+{
+    if (amount_paise < 0) {
+        printf("-");
+        print_amount(-amount_paise);
+    } else {
+        printf("+");
+        print_amount(amount_paise);
+    }
+}
+
+static void print_percentage_change(
+    const AnalyticsPercentageChange *percentage
+)
+{
+    if (percentage->state
+        == ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE) {
+        printf("N/A (zero baseline)");
+        return;
+    }
+
+    printf(
+        "%s%" PRIu64 ".%02" PRIu64 "%%",
+        percentage->is_negative ? "-" : "+",
+        percentage->basis_points / 100,
+        percentage->basis_points % 100
+    );
+}
+
+static void print_comparison_summary(
+    const char *label,
+    const AnalyticsSummary *summary
+)
+{
+    printf("%s: ", label);
+    print_amount(summary->total_paise);
+    printf(" (%zu transactions; average ", summary->transaction_count);
+    if (summary->transaction_count == 0) {
+        printf("N/A");
+    } else {
+        print_amount(summary->average_paise);
+        if (summary->average_remainder_paise != 0) {
+            printf(
+                " + %" PRId64 "/%zu paise",
+                summary->average_remainder_paise,
+                summary->transaction_count
+            );
+        }
+    }
+    printf(")\n");
+}
+
+static void show_period_comparison(
+    const ExpenseList *expenses,
+    const CategoryList *categories,
+    int comparison_type
+)
+{
+    AnalyticsPeriod period_a = {0};
+    AnalyticsPeriod period_b = {0};
+    AnalyticsComparison comparison;
+    AnalyticsResult result;
+
+    if (!read_comparison_period(comparison_type, "Period A", &period_a)
+        || !read_comparison_period(comparison_type, "Period B", &period_b)) {
+        printf("Invalid comparison period. No periods were changed.\n");
+        return;
+    }
+
+    result = analytics_compare_periods(
+        expenses,
+        categories,
+        &period_a,
+        &period_b,
+        &comparison
+    );
+    if (result == ANALYTICS_INVALID_CATEGORY) {
+        printf(
+            "Unable to compare categories: an expense references an unknown "
+            "category.\n"
+        );
+        return;
+    }
+    if (result == ANALYTICS_MEMORY_ERROR) {
+        printf("Unable to compare periods: memory allocation failed.\n");
+        return;
+    }
+    if (result == ANALYTICS_OVERFLOW) {
+        printf("Unable to compare periods: a total or percentage overflowed.\n");
+        return;
+    }
+    if (result != ANALYTICS_SUCCESS) {
+        printf("Unable to compare periods: invalid input.\n");
+        return;
+    }
+
+    printf("\nComparative Spending Analysis\n");
+    print_comparison_summary("Period A", &comparison.period_a);
+    print_comparison_summary("Period B", &comparison.period_b);
+    printf("Absolute change (B - A): ");
+    print_signed_amount(comparison.absolute_change_paise);
+    printf("\nPercentage change: ");
+    print_percentage_change(&comparison.percentage_change);
+    printf("\n\nCategory comparison (B - A):\n");
+
+    if (comparison.category_count == 0) {
+        printf("No category transactions in either period.\n");
+    } else {
+        printf("%-16s %11s %11s %11s %8s %8s %12s\n",
+            "Category", "A total", "B total", "Change", "A share",
+            "B share", "Change %");
+        for (size_t index = 0; index < comparison.category_count; index++) {
+            const AnalyticsCategoryComparison *category =
+                &comparison.categories[index];
+
+            printf("%-16s ", category->category_name);
+            print_amount(category->period_a_total_paise);
+            printf(" ");
+            print_amount(category->period_b_total_paise);
+            printf(" ");
+            print_signed_amount(category->absolute_change_paise);
+            printf(" ");
+            printf(
+                "%3u.%02u%% ",
+                category->period_a_percentage_basis_points / 100,
+                category->period_a_percentage_basis_points % 100
+            );
+            printf(
+                "%3u.%02u%% ",
+                category->period_b_percentage_basis_points / 100,
+                category->period_b_percentage_basis_points % 100
+            );
+            print_percentage_change(&category->percentage_change);
+            printf("\n");
+        }
+    }
+
+    analytics_comparison_destroy(&comparison);
+}
+
+static void show_comparison_menu(
+    const ExpenseList *expenses,
+    const CategoryList *categories
+)
+{
+    int choice;
+
+    printf("\nCompare Periods\n");
+    printf("[1] Month vs Month\n");
+    printf("[2] Year vs Year\n");
+    printf("[3] Date Range vs Date Range\n");
+    printf("[0] Back\n");
+    if (!read_integer("Choice (0-3): ", &choice)
+        || choice < 0 || choice > 3) {
+        printf("Invalid comparison choice.\n");
+        return;
+    }
+    if (choice != 0) {
+        show_period_comparison(expenses, categories, choice);
+    }
+}
+
 void analytics_ui_show_summary(
     const ExpenseList *expenses,
     const CategoryList *categories
@@ -475,8 +672,9 @@ void analytics_ui_show_summary(
         printf("[4] Monthly Spending\n");
         printf("[5] Yearly Spending\n");
         printf("[6] Custom Date Range\n");
+        printf("[7] Compare Periods\n");
         printf("[0] Back\n");
-        printf("Choice (0-6): ");
+        printf("Choice (0-7): ");
 
         read_result = read_input(input, sizeof(input));
         if (read_result == 0) {
@@ -484,7 +682,7 @@ void analytics_ui_show_summary(
             return;
         }
         if (read_result < 0) {
-            printf("Choice is too long. Enter a number from 0 to 6.\n");
+            printf("Choice is too long. Enter a number from 0 to 7.\n");
             continue;
         }
 
@@ -498,8 +696,8 @@ void analytics_ui_show_summary(
                 end++;
             }
             if (input == end || errno == ERANGE || *end != '\0'
-                || parsed < 0 || parsed > 6) {
-                printf("Invalid choice. Enter a number from 0 to 6.\n");
+                || parsed < 0 || parsed > 7) {
+                printf("Invalid choice. Enter a number from 0 to 7.\n");
                 continue;
             }
             choice = (int)parsed;
@@ -523,6 +721,9 @@ void analytics_ui_show_summary(
             break;
         case 6:
             show_date_range_summary(expenses);
+            break;
+        case 7:
+            show_comparison_menu(expenses, categories);
             break;
         case 0:
             running = 0;

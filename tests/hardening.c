@@ -629,7 +629,197 @@ int main(void)
             &breakdown
         ) == ANALYTICS_INVALID_INPUT);
 
-        period.type = ANALYTICS_PERIOD_ALL_TIME;
+        {
+            AnalyticsComparison comparison;
+            AnalyticsPeriod period_a = {0};
+            AnalyticsPeriod period_b = {0};
+
+            period_a.type = ANALYTICS_PERIOD_MONTH;
+            period_a.year = 2026;
+            period_a.month = 9;
+            period_b.type = ANALYTICS_PERIOD_MONTH;
+            period_b.year = 2025;
+            period_b.month = 12;
+            assert(analytics_compare_periods(
+                &breakdown_expenses,
+                &categories,
+                &period_a,
+                &period_b,
+                &comparison
+            ) == ANALYTICS_SUCCESS);
+            assert(comparison.period_a.total_paise == 1500);
+            assert(comparison.period_a.transaction_count == 4);
+            assert(comparison.period_a.average_paise == 375);
+            assert(comparison.period_b.total_paise == 2000);
+            assert(comparison.period_b.transaction_count == 1);
+            assert(comparison.period_b.average_paise == 2000);
+            assert(comparison.absolute_change_paise == 500);
+            assert(comparison.percentage_change.state
+                == ANALYTICS_PERCENTAGE_DEFINED);
+            assert(comparison.percentage_change.is_negative == 0);
+            assert(comparison.percentage_change.basis_points == 3333);
+            assert(comparison.category_count == 3);
+            assert(comparison.categories[0].category_id == 3);
+            assert(comparison.categories[0].period_a_total_paise == 800);
+            assert(comparison.categories[0].period_b_total_paise == 0);
+            assert(comparison.categories[0].absolute_change_paise == -800);
+            assert(comparison.categories[0].percentage_change.basis_points
+                == 10000);
+            assert(comparison.categories[0].percentage_change.is_negative);
+            assert(comparison.categories[1].category_id == 2);
+            assert(comparison.categories[1].period_a_total_paise == 700);
+            assert(comparison.categories[1].period_b_total_paise == 0);
+            assert(comparison.categories[2].category_id == 4);
+            assert(comparison.categories[2].period_a_total_paise == 0);
+            assert(comparison.categories[2].period_b_total_paise == 2000);
+            assert(comparison.categories[2].percentage_change.state
+                == ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE);
+            assert(comparison.categories[2].period_b_percentage_basis_points
+                == 10000);
+            analytics_comparison_destroy(&comparison);
+            assert(comparison.categories == NULL);
+            assert(comparison.period_a.category_totals_paise == NULL);
+            assert(comparison.period_b.category_totals_paise == NULL);
+
+            period_b = period_a;
+            assert(analytics_compare_periods(
+                &breakdown_expenses,
+                &categories,
+                &period_a,
+                &period_b,
+                &comparison
+            ) == ANALYTICS_SUCCESS);
+            assert(comparison.absolute_change_paise == 0);
+            assert(comparison.percentage_change.state
+                == ANALYTICS_PERCENTAGE_DEFINED);
+            assert(comparison.percentage_change.basis_points == 0);
+            analytics_comparison_destroy(&comparison);
+
+            period_a.type = ANALYTICS_PERIOD_YEAR;
+            period_a.year = 2025;
+            period_b.type = ANALYTICS_PERIOD_YEAR;
+            period_b.year = 2026;
+            assert(analytics_compare_periods(
+                &breakdown_expenses,
+                &categories,
+                &period_a,
+                &period_b,
+                &comparison
+            ) == ANALYTICS_SUCCESS);
+            assert(comparison.period_a.total_paise == 2000);
+            assert(comparison.period_b.total_paise == 1500);
+            assert(comparison.absolute_change_paise == -500);
+            assert(comparison.percentage_change.is_negative);
+            assert(comparison.percentage_change.basis_points == 2500);
+            analytics_comparison_destroy(&comparison);
+
+            period_a.type = ANALYTICS_PERIOD_DATE_RANGE;
+            period_a.start_date = (Timestamp){2026, 9, 20, 0, 0, 0};
+            period_a.end_date = period_a.start_date;
+            period_b.type = ANALYTICS_PERIOD_DATE_RANGE;
+            period_b.start_date = period_a.start_date;
+            period_b.end_date = (Timestamp){2026, 9, 21, 0, 0, 0};
+            assert(analytics_compare_periods(
+                &breakdown_expenses,
+                &categories,
+                &period_a,
+                &period_b,
+                &comparison
+            ) == ANALYTICS_SUCCESS);
+            assert(comparison.period_a.total_paise == 1000);
+            assert(comparison.period_a.transaction_count == 3);
+            assert(comparison.period_b.total_paise == 1500);
+            assert(comparison.period_b.transaction_count == 4);
+            assert(comparison.absolute_change_paise == 500);
+            assert(comparison.percentage_change.basis_points == 5000);
+            analytics_comparison_destroy(&comparison);
+
+            period_a.start_date = (Timestamp){2026, 9, 21, 0, 0, 0};
+            period_a.end_date = (Timestamp){2026, 9, 20, 0, 0, 0};
+            assert(analytics_compare_periods(
+                &breakdown_expenses,
+                &categories,
+                &period_a,
+                &period_b,
+                &comparison
+            ) == ANALYTICS_INVALID_INPUT);
+
+            period_a.type = ANALYTICS_PERIOD_YEAR;
+            period_a.year = 2027;
+            period_b.type = ANALYTICS_PERIOD_YEAR;
+            period_b.year = 2026;
+            assert(analytics_compare_periods(
+                &breakdown_expenses,
+                &categories,
+                &period_a,
+                &period_b,
+                &comparison
+            ) == ANALYTICS_SUCCESS);
+            assert(comparison.period_a.transaction_count == 0);
+            assert(comparison.period_b.total_paise == 1500);
+            assert(comparison.absolute_change_paise == 1500);
+            assert(comparison.percentage_change.state
+                == ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE);
+            analytics_comparison_destroy(&comparison);
+
+            period_b.year = 2028;
+            assert(analytics_compare_periods(
+                &breakdown_expenses,
+                &categories,
+                &period_a,
+                &period_b,
+                &comparison
+            ) == ANALYTICS_SUCCESS);
+            assert(comparison.period_a.total_paise == 0);
+            assert(comparison.period_b.total_paise == 0);
+            assert(comparison.absolute_change_paise == 0);
+            assert(comparison.percentage_change.state
+                == ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE);
+            analytics_comparison_destroy(&comparison);
+
+            period_a.year = 2026;
+            period_b.year = 2027;
+            assert(analytics_compare_periods(
+                &breakdown_expenses,
+                &categories,
+                &period_a,
+                &period_b,
+                &comparison
+            ) == ANALYTICS_SUCCESS);
+            assert(comparison.absolute_change_paise == -1500);
+            assert(comparison.percentage_change.is_negative);
+            assert(comparison.percentage_change.basis_points == 10000);
+            analytics_comparison_destroy(&comparison);
+
+            period_a.year = 2027;
+            assert(analytics_compare_periods(
+                &breakdown_expenses,
+                &categories,
+                &period_a,
+                &period_b,
+                &comparison
+            ) == ANALYTICS_SUCCESS);
+            assert(comparison.categories == NULL);
+            assert(comparison.category_count == 0);
+            analytics_comparison_destroy(&comparison);
+
+            period_a.year = 2026;
+            {
+                int original_category_id = breakdown_expenses.items[0]
+                    .category_id;
+                breakdown_expenses.items[0].category_id = 999;
+                assert(analytics_compare_periods(
+                    &breakdown_expenses,
+                    &categories,
+                    &period_a,
+                    &period_b,
+                    &comparison
+                ) == ANALYTICS_INVALID_CATEGORY);
+                assert(comparison.categories == NULL);
+                breakdown_expenses.items[0].category_id = original_category_id;
+            }
+        }
+
         assert(expense_list_add(
             &breakdown_expenses,
             make_expense(35, 999, 2026, 9, 20, 10, "missing category")
@@ -643,6 +833,72 @@ int main(void)
         assert(breakdown.items == NULL && breakdown.size == 0);
 
         expense_list_destroy(&breakdown_expenses);
+    }
+    {
+        ExpenseList precision_expenses;
+        AnalyticsComparison comparison;
+        AnalyticsPeriod period_a = {0};
+        AnalyticsPeriod period_b = {0};
+
+        expense_list_init(&precision_expenses);
+        assert(expense_list_add(
+            &precision_expenses,
+            make_expense(40, 2, 2026, 8, 31, 480000, "August")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &precision_expenses,
+            make_expense(41, 2, 2026, 9, 27, 620000, "September")
+        ) == EXPENSE_SUCCESS);
+        period_a.type = ANALYTICS_PERIOD_MONTH;
+        period_a.year = 2026;
+        period_a.month = 8;
+        period_b.type = ANALYTICS_PERIOD_MONTH;
+        period_b.year = 2026;
+        period_b.month = 9;
+        assert(analytics_compare_periods(
+            &precision_expenses,
+            &categories,
+            &period_a,
+            &period_b,
+            &comparison
+        ) == ANALYTICS_SUCCESS);
+        assert(comparison.period_a.total_paise == 480000);
+        assert(comparison.period_b.total_paise == 620000);
+        assert(comparison.absolute_change_paise == 140000);
+        assert(comparison.percentage_change.basis_points == 2917);
+        analytics_comparison_destroy(&comparison);
+        expense_list_destroy(&precision_expenses);
+    }
+    {
+        ExpenseList percentage_overflow_expenses;
+        AnalyticsComparison comparison;
+        AnalyticsPeriod period_a = {0};
+        AnalyticsPeriod period_b = {0};
+
+        expense_list_init(&percentage_overflow_expenses);
+        assert(expense_list_add(
+            &percentage_overflow_expenses,
+            make_expense(42, 2, 2025, 1, 1, 1, "small baseline")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &percentage_overflow_expenses,
+            make_expense(43, 2, 2026, 1, 1, INT64_MAX, "large result")
+        ) == EXPENSE_SUCCESS);
+        period_a.type = ANALYTICS_PERIOD_YEAR;
+        period_a.year = 2025;
+        period_b.type = ANALYTICS_PERIOD_YEAR;
+        period_b.year = 2026;
+        assert(analytics_compare_periods(
+            &percentage_overflow_expenses,
+            &categories,
+            &period_a,
+            &period_b,
+            &comparison
+        ) == ANALYTICS_OVERFLOW);
+        assert(comparison.categories == NULL);
+        assert(comparison.period_a.category_totals_paise == NULL);
+        assert(comparison.period_b.category_totals_paise == NULL);
+        expense_list_destroy(&percentage_overflow_expenses);
     }
     {
         CategoryList growth_categories;
@@ -717,6 +973,27 @@ int main(void)
             assert(summary.total_paise == INT64_MAX);
             assert(summary.average_paise == INT64_MAX);
             analytics_summary_destroy(&summary);
+        }
+        {
+            AnalyticsComparison comparison;
+            AnalyticsPeriod period_a = {0};
+            AnalyticsPeriod period_b = {0};
+
+            period_a.type = ANALYTICS_PERIOD_YEAR;
+            period_a.year = 2026;
+            period_b.type = ANALYTICS_PERIOD_YEAR;
+            period_b.year = 2027;
+            assert(analytics_compare_periods(
+                &one_expense,
+                &categories,
+                &period_a,
+                &period_b,
+                &comparison
+            ) == ANALYTICS_SUCCESS);
+            assert(comparison.absolute_change_paise == -INT64_MAX);
+            assert(comparison.percentage_change.is_negative);
+            assert(comparison.percentage_change.basis_points == 10000);
+            analytics_comparison_destroy(&comparison);
         }
         assert(analytics_calculate_category_breakdown(
             &one_expense,

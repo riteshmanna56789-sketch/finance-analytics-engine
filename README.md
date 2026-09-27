@@ -32,6 +32,10 @@ the same local CLI architecture.
   year, or inclusive date range, with per-category totals, transaction counts,
   and percentages of the selected-period total. Historical spending remains
   included for inactive categories.
+- Compare spending between two months, two years, or two inclusive date
+  ranges, including total/count/average changes and category-level changes.
+  Percentage changes use controlled two-decimal precision and show as
+  unavailable when the baseline is zero.
 - Validate user input and stored records, including amounts, IDs, categories,
   dates, and string boundaries.
 - Run assertion-based hardening tests for data operations, querying, sorting,
@@ -60,7 +64,9 @@ Major module responsibilities:
   and inclusive date-range summaries use linear scans and do not depend on
   category references. Category breakdowns group matching expenses, retain
   first-seen category order, and compute percentages rounded to two decimal
-  places.
+  places. Comparative analysis composes period summaries and category
+  breakdowns, joins categories by stable ID, and reports signed absolute and
+  percentage changes without subjective assessments.
 - **analytics_ui** (`analytics_ui.h`, `analytics_ui.c`): presentation and
   input for overall, time-based, and category-based spending summaries,
   keeping analytics UI out of `main`.

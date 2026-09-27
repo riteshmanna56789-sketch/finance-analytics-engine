@@ -52,6 +52,132 @@ static void summary_set_average(AnalyticsSummary *summary)
     }
 }
 
+static int subtract_amounts(int64_t left, int64_t right, int64_t *difference)
+{
+    if (difference == NULL
+        || (right > 0 && left < INT64_MIN + right)
+        || (right < 0 && left > INT64_MAX + right)) {
+        return 0;
+    }
+
+    *difference = left - right;
+    return 1;
+}
+
+static uint64_t scaled_ratio_threshold(
+    uint64_t denominator,
+    uint64_t numerator,
+    uint64_t scale
+)
+{
+    uint64_t quotient = denominator / scale;
+    uint64_t remainder = denominator % scale;
+
+    return quotient * numerator
+        + (remainder * numerator + scale - 1) / scale;
+}
+
+static int ratio_basis_points(
+    uint64_t numerator,
+    uint64_t denominator,
+    uint64_t *basis_points
+)
+{
+    const uint64_t scale = 10000;
+    uint64_t whole;
+    uint64_t remainder;
+    uint64_t low = 0;
+    uint64_t high = scale;
+    uint64_t fractional;
+
+    if (denominator == 0 || basis_points == NULL) {
+        return 0;
+    }
+    if (numerator == 0) {
+        *basis_points = 0;
+        return 1;
+    }
+
+    whole = numerator / denominator;
+    remainder = numerator % denominator;
+    if (whole > UINT64_MAX / scale) {
+        return 0;
+    }
+
+    while (low < high) {
+        uint64_t candidate = low + (high - low + 1) / 2;
+        uint64_t threshold = scaled_ratio_threshold(
+            denominator,
+            candidate,
+            scale
+        );
+
+        if (threshold <= remainder) {
+            low = candidate;
+        } else {
+            high = candidate - 1;
+        }
+    }
+
+    fractional = low;
+    if (remainder >= scaled_ratio_threshold(
+            denominator,
+            fractional * 2 + 1,
+            scale * 2
+        )) {
+        fractional++;
+    }
+
+    if (whole == UINT64_MAX / scale && fractional > UINT64_MAX % scale) {
+        return 0;
+    }
+    *basis_points = whole * scale + fractional;
+    return 1;
+}
+
+static AnalyticsResult calculate_percentage_change(
+    int64_t baseline,
+    int64_t change,
+    AnalyticsPercentageChange *percentage
+)
+{
+    uint64_t magnitude;
+
+    if (percentage == NULL || baseline < 0) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    percentage->state = ANALYTICS_PERCENTAGE_DEFINED;
+    percentage->is_negative = change < 0;
+    percentage->basis_points = 0;
+
+    if (baseline == 0) {
+        if (change == 0) {
+            percentage->state =
+                ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE;
+            percentage->is_negative = 0;
+            return ANALYTICS_SUCCESS;
+        }
+        if (change > 0) {
+            percentage->state =
+                ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE;
+            percentage->is_negative = 0;
+            return ANALYTICS_SUCCESS;
+        }
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    magnitude = (uint64_t)(change < 0 ? -change : change);
+    if (!ratio_basis_points(
+            magnitude,
+            (uint64_t)baseline,
+            &percentage->basis_points
+        )) {
+        return ANALYTICS_OVERFLOW;
+    }
+    return ANALYTICS_SUCCESS;
+}
+
 static int is_today(const Timestamp *timestamp, const struct tm *current_time)
 {
     return timestamp->year == current_time->tm_year + 1900
@@ -592,6 +718,242 @@ void analytics_category_breakdown_destroy(
     breakdown->capacity = 0;
     breakdown->total_paise = 0;
     breakdown->transaction_count = 0;
+}
+
+static AnalyticsCategoryComparison *find_category_comparison(
+    AnalyticsComparison *comparison,
+    int category_id
+)
+{
+    for (size_t index = 0; index < comparison->category_count; index++) {
+        if (comparison->categories[index].category_id == category_id) {
+            return &comparison->categories[index];
+        }
+    }
+    return NULL;
+}
+
+static AnalyticsResult append_category_comparison(
+    AnalyticsComparison *comparison,
+    const AnalyticsCategoryTotal *source,
+    AnalyticsCategoryComparison **appended
+)
+{
+    size_t new_capacity;
+    AnalyticsCategoryComparison *resized;
+    AnalyticsCategoryComparison *item;
+
+    if (comparison->category_count == comparison->category_capacity) {
+        if (comparison->category_capacity == 0) {
+            new_capacity = 4;
+        } else {
+            if (comparison->category_capacity > SIZE_MAX / 2) {
+                return ANALYTICS_MEMORY_ERROR;
+            }
+            new_capacity = comparison->category_capacity * 2;
+        }
+        if (new_capacity > SIZE_MAX / sizeof(*comparison->categories)) {
+            return ANALYTICS_MEMORY_ERROR;
+        }
+
+        resized = realloc(
+            comparison->categories,
+            new_capacity * sizeof(*resized)
+        );
+        if (resized == NULL) {
+            return ANALYTICS_MEMORY_ERROR;
+        }
+        comparison->categories = resized;
+        comparison->category_capacity = new_capacity;
+    }
+
+    item = &comparison->categories[comparison->category_count++];
+    memset(item, 0, sizeof(*item));
+    item->category_id = source->category_id;
+    memcpy(item->category_name, source->category_name, sizeof(item->category_name));
+    *appended = item;
+    return ANALYTICS_SUCCESS;
+}
+
+static void copy_category_period_a(
+    AnalyticsCategoryComparison *target,
+    const AnalyticsCategoryTotal *source
+)
+{
+    target->period_a_total_paise = source->total_paise;
+    target->period_a_transaction_count = source->transaction_count;
+    target->period_a_percentage_basis_points =
+        source->percentage_basis_points;
+}
+
+static void copy_category_period_b(
+    AnalyticsCategoryComparison *target,
+    const AnalyticsCategoryTotal *source
+)
+{
+    target->period_b_total_paise = source->total_paise;
+    target->period_b_transaction_count = source->transaction_count;
+    target->period_b_percentage_basis_points =
+        source->percentage_basis_points;
+}
+
+AnalyticsResult analytics_compare_periods(
+    const ExpenseList *expenses,
+    const CategoryList *categories,
+    const AnalyticsPeriod *period_a,
+    const AnalyticsPeriod *period_b,
+    AnalyticsComparison *comparison
+)
+{
+    AnalyticsCategoryBreakdown breakdown_a = {0};
+    AnalyticsCategoryBreakdown breakdown_b = {0};
+    AnalyticsResult result;
+
+    if (comparison == NULL) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    memset(comparison, 0, sizeof(*comparison));
+    if (expenses == NULL || categories == NULL || period_a == NULL
+        || period_b == NULL || !period_is_valid(period_a)
+        || !period_is_valid(period_b)) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    result = calculate_period_summary(
+        expenses,
+        period_a,
+        &comparison->period_a
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        goto fail;
+    }
+    result = calculate_period_summary(
+        expenses,
+        period_b,
+        &comparison->period_b
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        goto fail;
+    }
+    if (!subtract_amounts(
+            comparison->period_b.total_paise,
+            comparison->period_a.total_paise,
+            &comparison->absolute_change_paise
+        )) {
+        result = ANALYTICS_OVERFLOW;
+        goto fail;
+    }
+    result = calculate_percentage_change(
+        comparison->period_a.total_paise,
+        comparison->absolute_change_paise,
+        &comparison->percentage_change
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        goto fail;
+    }
+
+    result = analytics_calculate_category_breakdown(
+        expenses,
+        categories,
+        period_a,
+        &breakdown_a
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        goto fail;
+    }
+    result = analytics_calculate_category_breakdown(
+        expenses,
+        categories,
+        period_b,
+        &breakdown_b
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        goto fail;
+    }
+
+    for (size_t index = 0; index < breakdown_a.size; index++) {
+        AnalyticsCategoryComparison *item;
+
+        result = append_category_comparison(
+            comparison,
+            &breakdown_a.items[index],
+            &item
+        );
+        if (result != ANALYTICS_SUCCESS) {
+            goto fail;
+        }
+        copy_category_period_a(item, &breakdown_a.items[index]);
+    }
+
+    for (size_t index = 0; index < breakdown_b.size; index++) {
+        AnalyticsCategoryComparison *item = find_category_comparison(
+            comparison,
+            breakdown_b.items[index].category_id
+        );
+
+        if (item == NULL) {
+            result = append_category_comparison(
+                comparison,
+                &breakdown_b.items[index],
+                &item
+            );
+            if (result != ANALYTICS_SUCCESS) {
+                goto fail;
+            }
+        }
+        copy_category_period_b(item, &breakdown_b.items[index]);
+    }
+
+    for (size_t index = 0; index < comparison->category_count; index++) {
+        AnalyticsCategoryComparison *item = &comparison->categories[index];
+
+        if (!subtract_amounts(
+                item->period_b_total_paise,
+                item->period_a_total_paise,
+                &item->absolute_change_paise
+            )) {
+            result = ANALYTICS_OVERFLOW;
+            goto fail;
+        }
+        result = calculate_percentage_change(
+            item->period_a_total_paise,
+            item->absolute_change_paise,
+            &item->percentage_change
+        );
+        if (result != ANALYTICS_SUCCESS) {
+            goto fail;
+        }
+    }
+
+    analytics_category_breakdown_destroy(&breakdown_a);
+    analytics_category_breakdown_destroy(&breakdown_b);
+    return ANALYTICS_SUCCESS;
+
+fail:
+    analytics_category_breakdown_destroy(&breakdown_a);
+    analytics_category_breakdown_destroy(&breakdown_b);
+    analytics_comparison_destroy(comparison);
+    return result;
+}
+
+void analytics_comparison_destroy(AnalyticsComparison *comparison)
+{
+    if (comparison == NULL) {
+        return;
+    }
+
+    analytics_summary_destroy(&comparison->period_a);
+    analytics_summary_destroy(&comparison->period_b);
+    free(comparison->categories);
+    comparison->categories = NULL;
+    comparison->category_count = 0;
+    comparison->category_capacity = 0;
+    comparison->absolute_change_paise = 0;
+    comparison->percentage_change.state =
+        ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE;
+    comparison->percentage_change.is_negative = 0;
+    comparison->percentage_change.basis_points = 0;
 }
 
 void analytics_summary_destroy(AnalyticsSummary *summary)
