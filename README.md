@@ -24,8 +24,8 @@ organization, querying, and basic spending analysis.
   range, date range, or combinations of those filters.
 - Sort expense views by date, amount, or category without changing the
   canonical expense-list order.
-- View a spending summary with total, today, current-month, and category
-  totals.
+- View a spending summary with total, transaction count, exact integer
+  average, minimum, maximum, today, current-month, and category totals.
 - Validate user input and stored records, including amounts, IDs, categories,
   dates, and string boundaries.
 - Run assertion-based hardening tests for data operations, querying, sorting,
@@ -47,8 +47,12 @@ Major module responsibilities:
   category ID allocation, active-category lookup, and deactivation.
 - **storage** (`storage.h`, `storage.c`): local save/load, record validation,
   and replacement of the saved file.
-- **analytics** (`analytics.h`, `analytics.c`): total, today, current-month,
-  and per-category spending calculations.
+- **analytics** (`analytics.h`, `analytics.c`): checked total, today,
+  current-month, and per-category spending calculations; transaction count,
+  exact average representation, minimum, and maximum. Invalid category
+  references and total overflow are reported explicitly.
+- **analytics_ui** (`analytics_ui.h`, `analytics_ui.c`): presentation and
+  error messages for the spending summary, keeping summary UI out of `main`.
 - **query** (`query.h`, `query.c`): category, amount, time, note, date/amount
   range, and combined expense queries.
 - **sorting** (`sorting.h`, `sorting.c`): stable sorting of a temporary
@@ -70,6 +74,11 @@ Major module responsibilities:
 
 Money is stored as `int64_t amount_paise`, not as `float` or `double`. This
 avoids floating-point rounding in stored monetary values.
+
+The analytics average is kept exact as an integer quotient and remainder:
+`average_paise` plus `average_remainder_paise / transaction_count` paise.
+Minimum and maximum values are only meaningful when the transaction count is
+nonzero.
 
 Each expense stores a `category_id` rather than a copy of the category name.
 This preserves the relationship to one stable category record, including when
@@ -129,6 +138,7 @@ Finance Analytics Engine/
 │   └── finance.dat          # Local application data (created/updated on save)
 ├── include/
 │   ├── analytics.h
+│   ├── analytics_ui.h
 │   ├── category.h
 │   ├── expense.h
 │   ├── expense_management.h
@@ -137,6 +147,7 @@ Finance Analytics Engine/
 │   └── storage.h
 ├── src/
 │   ├── analytics.c
+│   ├── analytics_ui.c
 │   ├── category.c
 │   ├── expense.c
 │   ├── expense_management.c

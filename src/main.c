@@ -1,7 +1,7 @@
 #include "category.h"
 #include "expense.h"
 #include "expense_management.h"
-#include "analytics.h"
+#include "analytics_ui.h"
 #include "query.h"
 #include "sorting.h"
 #include "storage.h"
@@ -1160,75 +1160,6 @@ static void view_expenses(
     }
 }
 
-static void view_spending_summary(
-    const ExpenseList *expenses,
-    const CategoryList *categories
-)
-{
-    AnalyticsSummary summary;
-
-    AnalyticsResult result = analytics_calculate_summary(
-        expenses,
-        categories,
-        &summary
-    );
-
-    if (result == ANALYTICS_MEMORY_ERROR) {
-        printf(
-            "Unable to calculate the summary because memory allocation "
-            "failed.\n"
-        );
-        return;
-    }
-
-    if (result == ANALYTICS_OVERFLOW) {
-        printf(
-            "Unable to calculate the summary because a total would "
-            "overflow int64_t.\n"
-        );
-        return;
-    }
-
-    if (result != ANALYTICS_SUCCESS) {
-        printf("Unable to calculate the spending summary.\n");
-        return;
-    }
-
-    printf("\n---------- SPENDING SUMMARY ----------\n");
-
-    printf("Total Spent: ");
-    print_amount(summary.total_paise);
-
-    printf("\nToday: ");
-    print_amount(summary.today_paise);
-
-    printf("\nThis Month: ");
-    print_amount(summary.current_month_paise);
-
-    printf("\n\nBy Category:\n");
-
-    if (expenses->size == 0) {
-        printf("No expenses recorded.\n");
-    } else {
-        for (size_t index = 0; index < categories->size; index++) {
-            if (summary.category_totals_paise[index] > 0) {
-                printf(
-                    "%-18s ",
-                    categories->items[index].name
-                );
-
-                print_amount(
-                    summary.category_totals_paise[index]
-                );
-
-                printf("\n");
-            }
-        }
-    }
-
-    analytics_summary_destroy(&summary);
-}
-
 int main(void)
 {
     static const char *DATA_FILE = "data/finance.dat";
@@ -1315,7 +1246,7 @@ int main(void)
             break;
 
         case 4:
-            view_spending_summary(&expenses, &categories);
+            analytics_ui_show_summary(&expenses, &categories);
             break;
 
         case 5:

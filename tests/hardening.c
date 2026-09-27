@@ -125,7 +125,7 @@ int main(void)
     ) == EXPENSE_SUCCESS);
     assert(expense_list_add(
         &expenses,
-        make_expense(3, 2, 2026, 9, 21, 10000, "bus")
+        make_expense(3, 2, 2026, 9, 21, 10001, "bus")
     ) == EXPENSE_SUCCESS);
     assert(expenses.next_id == 4);
     assert(expense_list_add(
@@ -269,7 +269,12 @@ int main(void)
         &empty_expenses,
         &empty_categories,
         &summary
-    ) == ANALYTICS_SUCCESS && summary.total_paise == 0);
+    ) == ANALYTICS_SUCCESS
+        && summary.total_paise == 0
+        && summary.transaction_count == 0
+        && summary.average_paise == 0
+        && summary.minimum_paise == 0
+        && summary.maximum_paise == 0);
     analytics_summary_destroy(&summary);
     assert(analytics_calculate_summary(
         &expenses,
@@ -284,10 +289,48 @@ int main(void)
         &categories,
         &summary
     ) == ANALYTICS_SUCCESS);
-    assert(summary.total_paise == 10101);
+    assert(summary.total_paise == 10102);
+    assert(summary.transaction_count == 3);
+    assert(summary.average_paise == 3367);
+    assert(summary.average_remainder_paise == 1);
+    assert(summary.minimum_paise == 1);
+    assert(summary.maximum_paise == 10001);
     assert(summary.category_totals_paise[2] == 1);
     assert(summary.category_totals_paise[3] == 100);
     analytics_summary_destroy(&summary);
+    {
+        int original_category_id = expenses.items[0].category_id;
+
+        expenses.items[0].category_id = 999;
+        assert(analytics_calculate_summary(
+            &expenses,
+            &categories,
+            &summary
+        ) == ANALYTICS_INVALID_CATEGORY);
+        assert(summary.category_totals_paise == NULL);
+        expenses.items[0].category_id = original_category_id;
+    }
+
+    {
+        ExpenseList one_expense;
+        expense_list_init(&one_expense);
+        assert(expense_list_add(
+            &one_expense,
+            make_expense(20, 2, 2026, 9, 20, INT64_MAX, "largest")
+        ) == EXPENSE_SUCCESS);
+        assert(analytics_calculate_summary(
+            &one_expense,
+            &categories,
+            &summary
+        ) == ANALYTICS_SUCCESS);
+        assert(summary.transaction_count == 1);
+        assert(summary.average_paise == INT64_MAX);
+        assert(summary.average_remainder_paise == 0);
+        assert(summary.minimum_paise == INT64_MAX);
+        assert(summary.maximum_paise == INT64_MAX);
+        analytics_summary_destroy(&summary);
+        expense_list_destroy(&one_expense);
+    }
 
     assert(expense_delete(&expenses, 1) == EXPENSE_SUCCESS);
     assert(expenses.items[0].id == 2);
