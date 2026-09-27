@@ -29,7 +29,7 @@ int expense_date_is_valid(int year, int month, int day)
     return day <= days_in_month;
 }
 
-static int timestamp_is_valid(const Timestamp *timestamp)
+int expense_timestamp_is_valid(const Timestamp *timestamp)
 {
     return timestamp != NULL
         && expense_date_is_valid(
@@ -79,7 +79,7 @@ ExpenseResult expense_list_add(ExpenseList *list, Expense expense)
 {
     if (list == NULL || expense.id < 1 || expense.category_id < 1
         || expense.amount_paise <= 0
-        || !timestamp_is_valid(&expense.timestamp)
+        || !expense_timestamp_is_valid(&expense.timestamp)
         || memchr(expense.note, '\0', sizeof(expense.note)) == NULL
         || !note_is_single_line(expense.note)
         || list->size > list->capacity

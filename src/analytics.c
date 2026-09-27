@@ -262,7 +262,8 @@ AnalyticsResult analytics_calculate_summary(
         );
         size_t category_index;
 
-        if (expense->amount_paise <= 0) {
+        if (expense->amount_paise <= 0
+            || !expense_timestamp_is_valid(&expense->timestamp)) {
             result = ANALYTICS_INVALID_INPUT;
             goto fail;
         }
@@ -386,11 +387,7 @@ static AnalyticsResult calculate_period_summary(
         const Expense *expense = &expenses->items[index];
 
         if (expense->amount_paise <= 0
-            || !expense_date_is_valid(
-                expense->timestamp.year,
-                expense->timestamp.month,
-                expense->timestamp.day
-            )) {
+            || !expense_timestamp_is_valid(&expense->timestamp)) {
             result = ANALYTICS_INVALID_INPUT;
             goto fail;
         }

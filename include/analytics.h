@@ -164,6 +164,12 @@ typedef struct {
 #define ANALYTICS_MAX_YEARLY_TREND_PERIODS 200
 
 /*
+ * Zero-initialize result objects before first use. Before reusing an output
+ * object, call its matching destroy function; result APIs do not free any
+ * allocations held by a previous result.
+ */
+
+/*
  * For non-empty datasets, the average is represented exactly as
  * average_paise + average_remainder_paise / transaction_count paise.
  * minimum_paise and maximum_paise are meaningful only when the transaction

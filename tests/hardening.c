@@ -299,6 +299,24 @@ int main(void)
     assert(summary.category_totals_paise[3] == 100);
     analytics_summary_destroy(&summary);
     {
+        int original_hour = expenses.items[0].timestamp.hour;
+        expenses.items[0].timestamp.hour = 24;
+        assert(analytics_calculate_summary(
+            &expenses,
+            &categories,
+            &summary
+        ) == ANALYTICS_INVALID_INPUT);
+        assert(summary.category_totals_paise == NULL);
+        assert(analytics_calculate_monthly_summary(
+            &expenses,
+            2024,
+            2,
+            &summary
+        ) == ANALYTICS_INVALID_INPUT);
+        assert(summary.category_totals_paise == NULL);
+        expenses.items[0].timestamp.hour = original_hour;
+    }
+    {
         ExpenseList same_day;
         Timestamp date = {2026, 9, 20, 0, 0, 0};
         expense_list_init(&same_day);
