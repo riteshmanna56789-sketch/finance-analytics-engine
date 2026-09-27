@@ -95,6 +95,38 @@ typedef struct {
     size_t category_capacity;
 } AnalyticsComparison;
 
+typedef enum {
+    ANALYTICS_TREND_MONTHLY = 1,
+    ANALYTICS_TREND_YEARLY
+} AnalyticsTrendType;
+
+typedef struct {
+    int year;
+    int month;
+    int64_t total_paise;
+    size_t transaction_count;
+    int64_t average_paise;
+    int64_t average_remainder_paise;
+} AnalyticsTrendPeriod;
+
+typedef struct {
+    AnalyticsTrendPeriod *periods;
+    size_t period_count;
+    int64_t total_paise;
+    int64_t average_period_paise;
+    int64_t average_period_remainder_paise;
+    size_t highest_period_index;
+    size_t lowest_period_index;
+    size_t increasing_transitions;
+    size_t decreasing_transitions;
+    size_t unchanged_transitions;
+    int64_t first_to_last_change_paise;
+    AnalyticsPercentageChange first_to_last_percentage_change;
+} AnalyticsTrend;
+
+#define ANALYTICS_MAX_MONTHLY_TREND_PERIODS 1200
+#define ANALYTICS_MAX_YEARLY_TREND_PERIODS 200
+
 /*
  * For non-empty datasets, the average is represented exactly as
  * average_paise + average_remainder_paise / transaction_count paise.
@@ -174,6 +206,23 @@ AnalyticsResult analytics_compare_periods(
 );
 
 void analytics_comparison_destroy(AnalyticsComparison *comparison);
+
+/*
+ * Monthly trends are limited to 1200 consecutive months, yearly trends to
+ * 200 consecutive years, and generated years must not exceed 9999. The
+ * returned period array is owned by the trend and released by
+ * analytics_trend_destroy(). Calculation is O(period_count * expense_count).
+ */
+AnalyticsResult analytics_calculate_trend(
+    const ExpenseList *expenses,
+    AnalyticsTrendType type,
+    int start_year,
+    int start_month,
+    size_t period_count,
+    AnalyticsTrend *trend
+);
+
+void analytics_trend_destroy(AnalyticsTrend *trend);
 
 void analytics_summary_destroy(AnalyticsSummary *summary);
 

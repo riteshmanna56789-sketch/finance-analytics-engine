@@ -653,6 +653,162 @@ static void show_comparison_menu(
     }
 }
 
+static void print_trend_period(const AnalyticsTrendPeriod *period, int monthly)
+{
+    if (monthly) {
+        printf(
+            "%04d-%02d",
+            period->year,
+            period->month
+        );
+    } else {
+        printf("%04d", period->year);
+    }
+
+    printf("  ");
+    print_amount(period->total_paise);
+    printf("  %zu transactions  Average: ", period->transaction_count);
+    if (period->transaction_count == 0) {
+        printf("N/A");
+    } else {
+        print_amount(period->average_paise);
+        if (period->average_remainder_paise != 0) {
+            printf(
+                " + %" PRId64 "/%zu paise",
+                period->average_remainder_paise,
+                period->transaction_count
+            );
+        }
+    }
+    printf("\n");
+}
+
+static void show_trend(
+    const ExpenseList *expenses,
+    AnalyticsTrendType type
+)
+{
+    AnalyticsTrend trend;
+    AnalyticsResult result;
+    int year;
+    int month = 0;
+    int period_count;
+    int monthly = type == ANALYTICS_TREND_MONTHLY;
+    const char *title = monthly
+        ? "Monthly Spending Trend"
+        : "Yearly Spending Trend";
+
+    if (!read_integer("Starting year (1-9999): ", &year)
+        || year < 1 || year > 9999) {
+        printf("Invalid starting year.\n");
+        return;
+    }
+    if (monthly
+        && (!read_integer("Starting month (1-12): ", &month)
+            || month < 1 || month > 12)) {
+        printf("Invalid starting month.\n");
+        return;
+    }
+
+    printf(
+        "Maximum periods: %d\n",
+        monthly
+            ? ANALYTICS_MAX_MONTHLY_TREND_PERIODS
+            : ANALYTICS_MAX_YEARLY_TREND_PERIODS
+    );
+    if (!read_integer(
+            monthly ? "Number of months: " : "Number of years: ",
+            &period_count
+        )
+        || period_count <= 0) {
+        printf("Invalid period count.\n");
+        return;
+    }
+
+    result = analytics_calculate_trend(
+        expenses,
+        type,
+        year,
+        month,
+        (size_t)period_count,
+        &trend
+    );
+    if (result == ANALYTICS_INVALID_INPUT) {
+        printf("Invalid trend range or expense data.\n");
+        return;
+    }
+    if (result == ANALYTICS_MEMORY_ERROR) {
+        printf("Unable to calculate trend: memory allocation failed.\n");
+        return;
+    }
+    if (result == ANALYTICS_OVERFLOW) {
+        printf("Unable to calculate trend: an amount would overflow.\n");
+        return;
+    }
+    if (result != ANALYTICS_SUCCESS) {
+        printf("Unable to calculate trend.\n");
+        return;
+    }
+
+    printf("\n%s\n", title);
+    for (size_t index = 0; index < trend.period_count; index++) {
+        print_trend_period(&trend.periods[index], monthly);
+    }
+
+    printf("\nTrend Summary\n");
+    printf("Periods analyzed: %zu\n", trend.period_count);
+    printf("Total spending: ");
+    print_amount(trend.total_paise);
+    printf("\nAverage spending per period: ");
+    print_amount(trend.average_period_paise);
+    if (trend.average_period_remainder_paise != 0) {
+        printf(
+            " + %" PRId64 "/%zu paise",
+            trend.average_period_remainder_paise,
+            trend.period_count
+        );
+    }
+    printf("\nHighest-spending period: ");
+    print_trend_period(
+        &trend.periods[trend.highest_period_index],
+        monthly
+    );
+    printf("Lowest-spending period: ");
+    print_trend_period(
+        &trend.periods[trend.lowest_period_index],
+        monthly
+    );
+    printf("Increasing transitions: %zu\n", trend.increasing_transitions);
+    printf("Decreasing transitions: %zu\n", trend.decreasing_transitions);
+    printf("Unchanged transitions: %zu\n", trend.unchanged_transitions);
+    printf("First-to-last change: ");
+    print_signed_amount(trend.first_to_last_change_paise);
+    printf("\nFirst-to-last percentage change: ");
+    print_percentage_change(&trend.first_to_last_percentage_change);
+    printf("\n");
+    analytics_trend_destroy(&trend);
+}
+
+static void show_trend_menu(const ExpenseList *expenses)
+{
+    int choice;
+
+    printf("\nSpending Trends\n");
+    printf("[1] Monthly Trend\n");
+    printf("[2] Yearly Trend\n");
+    printf("[0] Back\n");
+    if (!read_integer("Choice (0-2): ", &choice)
+        || choice < 0 || choice > 2) {
+        printf("Invalid trend choice.\n");
+        return;
+    }
+    if (choice == 1) {
+        show_trend(expenses, ANALYTICS_TREND_MONTHLY);
+    } else if (choice == 2) {
+        show_trend(expenses, ANALYTICS_TREND_YEARLY);
+    }
+}
+
 void analytics_ui_show_summary(
     const ExpenseList *expenses,
     const CategoryList *categories
@@ -673,8 +829,9 @@ void analytics_ui_show_summary(
         printf("[5] Yearly Spending\n");
         printf("[6] Custom Date Range\n");
         printf("[7] Compare Periods\n");
+        printf("[8] Spending Trends\n");
         printf("[0] Back\n");
-        printf("Choice (0-7): ");
+        printf("Choice (0-8): ");
 
         read_result = read_input(input, sizeof(input));
         if (read_result == 0) {
@@ -682,7 +839,7 @@ void analytics_ui_show_summary(
             return;
         }
         if (read_result < 0) {
-            printf("Choice is too long. Enter a number from 0 to 7.\n");
+            printf("Choice is too long. Enter a number from 0 to 8.\n");
             continue;
         }
 
@@ -696,8 +853,8 @@ void analytics_ui_show_summary(
                 end++;
             }
             if (input == end || errno == ERANGE || *end != '\0'
-                || parsed < 0 || parsed > 7) {
-                printf("Invalid choice. Enter a number from 0 to 7.\n");
+                || parsed < 0 || parsed > 8) {
+                printf("Invalid choice. Enter a number from 0 to 8.\n");
                 continue;
             }
             choice = (int)parsed;
@@ -724,6 +881,9 @@ void analytics_ui_show_summary(
             break;
         case 7:
             show_comparison_menu(expenses, categories);
+            break;
+        case 8:
+            show_trend_menu(expenses);
             break;
         case 0:
             running = 0;

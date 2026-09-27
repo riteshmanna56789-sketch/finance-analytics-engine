@@ -956,6 +956,205 @@ void analytics_comparison_destroy(AnalyticsComparison *comparison)
     comparison->percentage_change.basis_points = 0;
 }
 
+static void initialize_trend(AnalyticsTrend *trend)
+{
+    memset(trend, 0, sizeof(*trend));
+    trend->first_to_last_percentage_change.state =
+        ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE;
+}
+
+static AnalyticsResult calculate_trend_period(
+    const ExpenseList *expenses,
+    AnalyticsTrendType type,
+    int year,
+    int month,
+    AnalyticsTrendPeriod *trend_period
+)
+{
+    AnalyticsPeriod period = {0};
+    AnalyticsSummary summary;
+    AnalyticsResult result;
+
+    if (type == ANALYTICS_TREND_MONTHLY) {
+        period.type = ANALYTICS_PERIOD_MONTH;
+        period.year = year;
+        period.month = month;
+        result = calculate_period_summary(expenses, &period, &summary);
+    } else {
+        period.type = ANALYTICS_PERIOD_YEAR;
+        period.year = year;
+        result = calculate_period_summary(expenses, &period, &summary);
+    }
+
+    if (result != ANALYTICS_SUCCESS) {
+        return result;
+    }
+
+    trend_period->year = year;
+    trend_period->month = type == ANALYTICS_TREND_MONTHLY ? month : 0;
+    trend_period->total_paise = summary.total_paise;
+    trend_period->transaction_count = summary.transaction_count;
+    trend_period->average_paise = summary.average_paise;
+    trend_period->average_remainder_paise =
+        summary.average_remainder_paise;
+    analytics_summary_destroy(&summary);
+    return ANALYTICS_SUCCESS;
+}
+
+AnalyticsResult analytics_calculate_trend(
+    const ExpenseList *expenses,
+    AnalyticsTrendType type,
+    int start_year,
+    int start_month,
+    size_t period_count,
+    AnalyticsTrend *trend
+)
+{
+    size_t maximum_period_count;
+    int year;
+    int month;
+    AnalyticsResult result = ANALYTICS_SUCCESS;
+
+    if (trend == NULL) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+    initialize_trend(trend);
+
+    if (type == ANALYTICS_TREND_MONTHLY) {
+        maximum_period_count = ANALYTICS_MAX_MONTHLY_TREND_PERIODS;
+        if (start_month < 1 || start_month > 12) {
+            return ANALYTICS_INVALID_INPUT;
+        }
+    } else if (type == ANALYTICS_TREND_YEARLY) {
+        maximum_period_count = ANALYTICS_MAX_YEARLY_TREND_PERIODS;
+        if (start_month != 0) {
+            return ANALYTICS_INVALID_INPUT;
+        }
+    } else {
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    if (expenses == NULL || start_year < 1 || start_year > 9999
+        || period_count == 0 || period_count > maximum_period_count
+        || expenses->size > expenses->capacity
+        || expenses->capacity > SIZE_MAX / sizeof(*expenses->items)
+        || (expenses->size > 0 && expenses->items == NULL)
+        || period_count > SIZE_MAX / sizeof(*trend->periods)) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    if (type == ANALYTICS_TREND_MONTHLY) {
+        size_t months_after_start = period_count - 1;
+        size_t starting_month_index = (size_t)(start_year - 1) * 12
+            + (size_t)(start_month - 1);
+        size_t final_month_index = starting_month_index + months_after_start;
+        if (final_month_index >= (size_t)9999 * 12) {
+            return ANALYTICS_INVALID_INPUT;
+        }
+    } else if (period_count - 1 > (size_t)(9999 - start_year)) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    trend->periods = calloc(period_count, sizeof(*trend->periods));
+    if (trend->periods == NULL) {
+        return ANALYTICS_MEMORY_ERROR;
+    }
+    trend->period_count = period_count;
+    year = start_year;
+    month = start_month;
+
+    for (size_t index = 0; index < period_count; index++) {
+        AnalyticsTrendPeriod *period = &trend->periods[index];
+
+        result = calculate_trend_period(
+            expenses,
+            type,
+            year,
+            month,
+            period
+        );
+        if (result != ANALYTICS_SUCCESS) {
+            goto fail;
+        }
+        if (!add_amount(&trend->total_paise, period->total_paise)) {
+            result = ANALYTICS_OVERFLOW;
+            goto fail;
+        }
+
+        if (index == 0) {
+            trend->highest_period_index = 0;
+            trend->lowest_period_index = 0;
+        } else {
+            const int64_t previous =
+                trend->periods[index - 1].total_paise;
+
+            if (period->total_paise > previous) {
+                trend->increasing_transitions++;
+            } else if (period->total_paise < previous) {
+                trend->decreasing_transitions++;
+            } else {
+                trend->unchanged_transitions++;
+            }
+
+            if (period->total_paise
+                > trend->periods[trend->highest_period_index].total_paise) {
+                trend->highest_period_index = index;
+            }
+            if (period->total_paise
+                < trend->periods[trend->lowest_period_index].total_paise) {
+                trend->lowest_period_index = index;
+            }
+        }
+
+        if (type == ANALYTICS_TREND_MONTHLY) {
+            if (month == 12) {
+                month = 1;
+                year++;
+            } else {
+                month++;
+            }
+        } else {
+            year++;
+        }
+    }
+
+    trend->average_period_paise =
+        trend->total_paise / (int64_t)period_count;
+    trend->average_period_remainder_paise =
+        trend->total_paise % (int64_t)period_count;
+
+    if (!subtract_amounts(
+            trend->periods[period_count - 1].total_paise,
+            trend->periods[0].total_paise,
+            &trend->first_to_last_change_paise)) {
+        result = ANALYTICS_OVERFLOW;
+        goto fail;
+    }
+    result = calculate_percentage_change(
+        trend->periods[0].total_paise,
+        trend->first_to_last_change_paise,
+        &trend->first_to_last_percentage_change
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        goto fail;
+    }
+    return ANALYTICS_SUCCESS;
+
+fail:
+    analytics_trend_destroy(trend);
+    return result;
+}
+
+void analytics_trend_destroy(AnalyticsTrend *trend)
+{
+    if (trend == NULL) {
+        return;
+    }
+
+    free(trend->periods);
+    initialize_trend(trend);
+}
+
 void analytics_summary_destroy(AnalyticsSummary *summary)
 {
     if (summary == NULL) {

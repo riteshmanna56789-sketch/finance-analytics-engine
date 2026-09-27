@@ -901,6 +901,266 @@ int main(void)
         expense_list_destroy(&percentage_overflow_expenses);
     }
     {
+        ExpenseList trend_expenses;
+        AnalyticsTrend trend;
+        expense_list_init(&trend_expenses);
+        assert(expense_list_add(
+            &trend_expenses,
+            make_expense(50, 2, 2026, 11, 1, 100, "November")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &trend_expenses,
+            make_expense(51, 2, 2026, 12, 1, 120, "December part one")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &trend_expenses,
+            make_expense(52, 2, 2026, 12, 2, 80, "December part two")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &trend_expenses,
+            make_expense(53, 2, 2027, 1, 1, 200, "January")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &trend_expenses,
+            make_expense(54, 2, 2027, 3, 1, 50, "March")
+        ) == EXPENSE_SUCCESS);
+
+        assert(analytics_calculate_trend(
+            &trend_expenses,
+            ANALYTICS_TREND_MONTHLY,
+            2026,
+            11,
+            5,
+            &trend
+        ) == ANALYTICS_SUCCESS);
+        assert(trend.period_count == 5);
+        assert(trend.periods[0].year == 2026
+            && trend.periods[0].month == 11);
+        assert(trend.periods[0].total_paise == 100);
+        assert(trend.periods[0].transaction_count == 1);
+        assert(trend.periods[0].average_paise == 100);
+        assert(trend.periods[1].year == 2026
+            && trend.periods[1].month == 12);
+        assert(trend.periods[1].total_paise == 200);
+        assert(trend.periods[1].transaction_count == 2);
+        assert(trend.periods[1].average_paise == 100);
+        assert(trend.periods[2].year == 2027
+            && trend.periods[2].month == 1);
+        assert(trend.periods[2].total_paise == 200);
+        assert(trend.periods[3].year == 2027
+            && trend.periods[3].month == 2);
+        assert(trend.periods[3].total_paise == 0);
+        assert(trend.periods[3].transaction_count == 0);
+        assert(trend.periods[4].year == 2027
+            && trend.periods[4].month == 3);
+        assert(trend.periods[4].total_paise == 50);
+        assert(trend.total_paise == 550);
+        assert(trend.average_period_paise == 110);
+        assert(trend.average_period_remainder_paise == 0);
+        assert(trend.highest_period_index == 1);
+        assert(trend.lowest_period_index == 3);
+        assert(trend.increasing_transitions == 2);
+        assert(trend.decreasing_transitions == 1);
+        assert(trend.unchanged_transitions == 1);
+        assert(trend.first_to_last_change_paise == -50);
+        assert(trend.first_to_last_percentage_change.is_negative);
+        assert(trend.first_to_last_percentage_change.basis_points == 5000);
+        analytics_trend_destroy(&trend);
+        assert(trend.periods == NULL && trend.period_count == 0);
+
+        assert(analytics_calculate_trend(
+            &trend_expenses,
+            ANALYTICS_TREND_MONTHLY,
+            2026,
+            11,
+            2,
+            &trend
+        ) == ANALYTICS_SUCCESS);
+        assert(trend.increasing_transitions == 1);
+        assert(trend.decreasing_transitions == 0);
+        assert(trend.unchanged_transitions == 0);
+        assert(trend.first_to_last_change_paise == 100);
+        assert(trend.first_to_last_percentage_change.basis_points == 10000);
+        analytics_trend_destroy(&trend);
+
+        assert(analytics_calculate_trend(
+            &trend_expenses,
+            ANALYTICS_TREND_MONTHLY,
+            2026,
+            12,
+            1,
+            &trend
+        ) == ANALYTICS_SUCCESS);
+        assert(trend.period_count == 1);
+        assert(trend.periods[0].total_paise == 200);
+        assert(trend.total_paise == 200);
+        assert(trend.average_period_paise == 200);
+        assert(trend.increasing_transitions == 0);
+        assert(trend.first_to_last_change_paise == 0);
+        assert(trend.first_to_last_percentage_change.basis_points == 0);
+        analytics_trend_destroy(&trend);
+
+        assert(analytics_calculate_trend(
+            &trend_expenses,
+            ANALYTICS_TREND_YEARLY,
+            2026,
+            0,
+            3,
+            &trend
+        ) == ANALYTICS_SUCCESS);
+        assert(trend.periods[0].year == 2026);
+        assert(trend.periods[0].total_paise == 300);
+        assert(trend.periods[1].year == 2027);
+        assert(trend.periods[1].total_paise == 250);
+        assert(trend.periods[2].year == 2028);
+        assert(trend.periods[2].total_paise == 0);
+        assert(trend.total_paise == 550);
+        assert(trend.average_period_paise == 183);
+        assert(trend.average_period_remainder_paise == 1);
+        assert(trend.highest_period_index == 0);
+        assert(trend.lowest_period_index == 2);
+        assert(trend.decreasing_transitions == 2);
+        assert(trend.first_to_last_change_paise == -300);
+        assert(trend.first_to_last_percentage_change.basis_points == 10000);
+        analytics_trend_destroy(&trend);
+
+        assert(analytics_calculate_trend(
+            &trend_expenses,
+            ANALYTICS_TREND_YEARLY,
+            2026,
+            0,
+            1,
+            &trend
+        ) == ANALYTICS_SUCCESS);
+        assert(trend.period_count == 1);
+        assert(trend.periods[0].total_paise == 300);
+        assert(trend.increasing_transitions == 0
+            && trend.decreasing_transitions == 0
+            && trend.unchanged_transitions == 0);
+        analytics_trend_destroy(&trend);
+
+        assert(analytics_calculate_trend(
+            &trend_expenses,
+            ANALYTICS_TREND_MONTHLY,
+            2027,
+            1,
+            3,
+            &trend
+        ) == ANALYTICS_SUCCESS);
+        assert(trend.periods[0].total_paise == 200);
+        assert(trend.periods[1].total_paise == 0);
+        assert(trend.periods[2].total_paise == 50);
+        assert(trend.first_to_last_change_paise == -150);
+        assert(trend.first_to_last_percentage_change.is_negative);
+        assert(trend.first_to_last_percentage_change.basis_points == 7500);
+        analytics_trend_destroy(&trend);
+
+        assert(analytics_calculate_trend(
+            &trend_expenses,
+            ANALYTICS_TREND_MONTHLY,
+            2026,
+            0,
+            2,
+            &trend
+        ) == ANALYTICS_INVALID_INPUT);
+        assert(analytics_calculate_trend(
+            &trend_expenses,
+            ANALYTICS_TREND_MONTHLY,
+            2026,
+            1,
+            0,
+            &trend
+        ) == ANALYTICS_INVALID_INPUT);
+        assert(analytics_calculate_trend(
+            &trend_expenses,
+            ANALYTICS_TREND_MONTHLY,
+            2026,
+            1,
+            ANALYTICS_MAX_MONTHLY_TREND_PERIODS + 1,
+            &trend
+        ) == ANALYTICS_INVALID_INPUT);
+        assert(analytics_calculate_trend(
+            &trend_expenses,
+            ANALYTICS_TREND_YEARLY,
+            2026,
+            1,
+            1,
+            &trend
+        ) == ANALYTICS_INVALID_INPUT);
+        assert(analytics_calculate_trend(
+            &trend_expenses,
+            ANALYTICS_TREND_MONTHLY,
+            9999,
+            12,
+            2,
+            &trend
+        ) == ANALYTICS_INVALID_INPUT);
+        assert(analytics_calculate_trend(
+            &trend_expenses,
+            ANALYTICS_TREND_YEARLY,
+            9999,
+            0,
+            2,
+            &trend
+        ) == ANALYTICS_INVALID_INPUT);
+
+        assert(analytics_calculate_trend(
+            &empty_expenses,
+            ANALYTICS_TREND_YEARLY,
+            2020,
+            0,
+            3,
+            &trend
+        ) == ANALYTICS_SUCCESS);
+        assert(trend.total_paise == 0);
+        assert(trend.average_period_paise == 0);
+        assert(trend.periods[0].transaction_count == 0
+            && trend.periods[1].transaction_count == 0
+            && trend.periods[2].transaction_count == 0);
+        assert(trend.highest_period_index == 0
+            && trend.lowest_period_index == 0);
+        assert(trend.unchanged_transitions == 2);
+        assert(trend.first_to_last_change_paise == 0);
+        assert(trend.first_to_last_percentage_change.state
+            == ANALYTICS_PERCENTAGE_UNDEFINED_ZERO_BASELINE);
+        analytics_trend_destroy(&trend);
+        expense_list_destroy(&trend_expenses);
+    }
+    {
+        ExpenseList trend_overflow_expenses;
+        AnalyticsTrend trend;
+
+        expense_list_init(&trend_overflow_expenses);
+        assert(expense_list_add(
+            &trend_overflow_expenses,
+            make_expense(60, 2, 2025, 12, 1, INT64_MAX, "first maximum")
+        ) == EXPENSE_SUCCESS);
+        assert(analytics_calculate_trend(
+            &trend_overflow_expenses,
+            ANALYTICS_TREND_YEARLY,
+            2025,
+            0,
+            1,
+            &trend
+        ) == ANALYTICS_SUCCESS);
+        assert(trend.total_paise == INT64_MAX);
+        analytics_trend_destroy(&trend);
+        assert(expense_list_add(
+            &trend_overflow_expenses,
+            make_expense(61, 2, 2026, 1, 1, 1, "second period")
+        ) == EXPENSE_SUCCESS);
+        assert(analytics_calculate_trend(
+            &trend_overflow_expenses,
+            ANALYTICS_TREND_YEARLY,
+            2025,
+            0,
+            2,
+            &trend
+        ) == ANALYTICS_OVERFLOW);
+        assert(trend.periods == NULL && trend.period_count == 0);
+        expense_list_destroy(&trend_overflow_expenses);
+    }
+    {
         CategoryList growth_categories;
         ExpenseList growth_expenses;
         AnalyticsCategoryBreakdown breakdown;

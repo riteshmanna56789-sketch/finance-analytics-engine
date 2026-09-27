@@ -36,6 +36,9 @@ the same local CLI architecture.
   ranges, including total/count/average changes and category-level changes.
   Percentage changes use controlled two-decimal precision and show as
   unavailable when the baseline is zero.
+- Analyze consecutive monthly or yearly spending trends, including each
+  period's total, transaction count, and average, plus sequence-wide total,
+  average, highest/lowest period, transition counts, and first-to-last change.
 - Validate user input and stored records, including amounts, IDs, categories,
   dates, and string boundaries.
 - Run assertion-based hardening tests for data operations, querying, sorting,
@@ -66,7 +69,9 @@ Major module responsibilities:
   first-seen category order, and compute percentages rounded to two decimal
   places. Comparative analysis composes period summaries and category
   breakdowns, joins categories by stable ID, and reports signed absolute and
-  percentage changes without subjective assessments.
+  percentage changes without subjective assessments. Trend analysis reuses
+  period summaries, generates bounded consecutive periods, and reports
+  sequence-level metrics without interpreting the results as advice.
 - **analytics_ui** (`analytics_ui.h`, `analytics_ui.c`): presentation and
   input for overall, time-based, and category-based spending summaries,
   keeping analytics UI out of `main`.
