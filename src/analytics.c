@@ -39,7 +39,12 @@ AnalyticsResult analytics_calculate_summary(
     time_t current_timestamp;
     struct tm *current_time;
 
-    if (expenses == NULL || categories == NULL || summary == NULL) {
+    if (expenses == NULL || categories == NULL || summary == NULL
+        || expenses->size > expenses->capacity
+        || (expenses->size > 0 && expenses->items == NULL)
+        || categories->size > categories->capacity
+        || (categories->size > 0 && categories->items == NULL)
+        || categories->size > SIZE_MAX / sizeof(*summary->category_totals_paise)) {
         return ANALYTICS_INVALID_INPUT;
     }
 

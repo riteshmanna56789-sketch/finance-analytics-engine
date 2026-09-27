@@ -9,6 +9,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 /* Version 2 persists the expense ID high-water mark. Version 1 remains loadable. */
 static const char *STORAGE_HEADER = "FAE_STORAGE 2";
 static const size_t MAX_LINE_LENGTH = 4096;
@@ -18,31 +22,68 @@ static int write_line(FILE *file, const char *text)
     return fputs(text, file) >= 0 && fputc('\n', file) != EOF;
 }
 
+static int text_has_line_break(const char *text)
+{
+    while (*text != '\0') {
+        if (*text == '\r' || *text == '\n') {
+            return 1;
+        }
+        text++;
+    }
+
+    return 0;
+}
+
 static int read_line(FILE *file, char *buffer, size_t buffer_size)
 {
-    size_t length;
+    size_t length = 0;
     int character;
+    int too_long = 0;
+    int read_anything = 0;
+    int pending_carriage_return = 0;
 
-    if (fgets(buffer, (int)buffer_size, file) == NULL) {
-        return 0;
-    }
-
-    length = strlen(buffer);
-    if (length > 0 && buffer[length - 1] == '\n') {
-        buffer[length - 1] = '\0';
-        if (length > 1 && buffer[length - 2] == '\r') {
-            buffer[length - 2] = '\0';
-        }
-        return 1;
-    }
-
-    if (length == buffer_size - 1) {
-        while ((character = fgetc(file)) != '\n' && character != EOF) {
-        }
+    if (buffer == NULL || buffer_size < 2) {
         return -1;
     }
 
-    return 1;
+    while ((character = fgetc(file)) != EOF && character != '\n') {
+        read_anything = 1;
+        if (pending_carriage_return) {
+            if (length + 1 < buffer_size && !too_long) {
+                buffer[length++] = '\r';
+            } else {
+                too_long = 1;
+            }
+            pending_carriage_return = 0;
+        }
+
+        if (character == '\r') {
+            pending_carriage_return = 1;
+        } else if (character == '\0' || length + 1 >= buffer_size) {
+            too_long = 1;
+        } else if (!too_long) {
+            buffer[length++] = (char)character;
+        }
+    }
+
+    if (ferror(file)) {
+        return -2;
+    }
+
+    if (!read_anything && character == EOF) {
+        return 0;
+    }
+
+    if (character != '\n' && pending_carriage_return) {
+        if (length + 1 < buffer_size && !too_long) {
+            buffer[length++] = '\r';
+        } else {
+            too_long = 1;
+        }
+    }
+
+    buffer[length] = '\0';
+    return too_long ? -1 : 1;
 }
 
 static int parse_unsigned(
@@ -52,6 +93,16 @@ static int parse_unsigned(
 {
     char *end;
     unsigned long long parsed;
+
+    if (text == NULL || value == NULL || text[0] < '0' || text[0] > '9') {
+        return 0;
+    }
+
+    for (const char *cursor = text; *cursor != '\0'; cursor++) {
+        if (*cursor < '0' || *cursor > '9') {
+            return 0;
+        }
+    }
 
     errno = 0;
     parsed = strtoull(text, &end, 10);
@@ -178,8 +229,14 @@ static StorageResult load_category(
 
     category.id = id;
     category.is_active = is_active;
-    if (category_list_add(categories, category) != CATEGORY_SUCCESS) {
-        return STORAGE_MEMORY_ERROR;
+    {
+        CategoryResult add_result = category_list_add(categories, category);
+        if (add_result == CATEGORY_MEMORY_ERROR) {
+            return STORAGE_MEMORY_ERROR;
+        }
+        if (add_result != CATEGORY_SUCCESS) {
+            return STORAGE_INVALID_DATA;
+        }
     }
 
     return STORAGE_SUCCESS;
@@ -187,12 +244,28 @@ static StorageResult load_category(
 
 static int timestamp_is_valid(const Timestamp *timestamp)
 {
-    return timestamp->year >= 1
-        && timestamp->month >= 1 && timestamp->month <= 12
-        && timestamp->day >= 1 && timestamp->day <= 31
-        && timestamp->hour >= 0 && timestamp->hour <= 23
-        && timestamp->minute >= 0 && timestamp->minute <= 59
-        && timestamp->second >= 0 && timestamp->second <= 60;
+    int days_in_month;
+
+    if (timestamp->year < 1
+        || timestamp->month < 1 || timestamp->month > 12
+        || timestamp->day < 1
+        || timestamp->hour < 0 || timestamp->hour > 23
+        || timestamp->minute < 0 || timestamp->minute > 59
+        || timestamp->second < 0 || timestamp->second > 60) {
+        return 0;
+    }
+
+    days_in_month = 31;
+    if (timestamp->month == 4 || timestamp->month == 6
+        || timestamp->month == 9 || timestamp->month == 11) {
+        days_in_month = 30;
+    } else if (timestamp->month == 2) {
+        int leap_year = timestamp->year % 400 == 0
+            || (timestamp->year % 4 == 0 && timestamp->year % 100 != 0);
+        days_in_month = leap_year ? 29 : 28;
+    }
+
+    return timestamp->day <= days_in_month;
 }
 
 static StorageResult load_expense(
@@ -240,11 +313,102 @@ static StorageResult load_expense(
         }
     }
 
-    if (expense_list_add(expenses, expense) != EXPENSE_SUCCESS) {
-        return STORAGE_MEMORY_ERROR;
+    {
+        ExpenseResult add_result = expense_list_add(expenses, expense);
+        if (add_result == EXPENSE_MEMORY_ERROR) {
+            return STORAGE_MEMORY_ERROR;
+        }
+        if (add_result != EXPENSE_SUCCESS) {
+            return STORAGE_INVALID_DATA;
+        }
     }
 
     return STORAGE_SUCCESS;
+}
+
+static int category_list_is_valid(const CategoryList *categories)
+{
+    if (categories->size > categories->capacity
+        || (categories->size > 0 && categories->items == NULL)
+        || categories->capacity > SIZE_MAX / sizeof(*categories->items)) {
+        return 0;
+    }
+
+    for (size_t index = 0; index < categories->size; index++) {
+        const Category *category = &categories->items[index];
+
+        if (category->id < 1
+            || (category->is_active != 0 && category->is_active != 1)
+            || memchr(category->name, '\0', sizeof(category->name)) == NULL
+            || category->name[0] == '\0'
+            || text_has_line_break(category->name)) {
+            return 0;
+        }
+        for (const char *cursor = category->name; *cursor != '\0'; cursor++) {
+            if (!isspace((unsigned char)*cursor)) {
+                break;
+            }
+            if (cursor[1] == '\0') {
+                return 0;
+            }
+        }
+
+        for (size_t other_index = 0; other_index < index; other_index++) {
+            if (categories->items[other_index].id == category->id
+                || strcmp(
+                    categories->items[other_index].name,
+                    category->name
+                ) == 0) {
+                return 0;
+            }
+        }
+    }
+
+    return 1;
+}
+
+static int expense_list_is_valid(
+    const CategoryList *categories,
+    const ExpenseList *expenses
+)
+{
+    int highest_id = 0;
+
+    if (expenses->size > expenses->capacity
+        || (expenses->size > 0 && expenses->items == NULL)
+        || expenses->capacity > SIZE_MAX / sizeof(*expenses->items)
+        || expenses->next_id < 1) {
+        return 0;
+    }
+
+    for (size_t index = 0; index < expenses->size; index++) {
+        const Expense *expense = &expenses->items[index];
+
+        if (expense->id < 1
+            || expense->amount_paise <= 0
+            || !timestamp_is_valid(&expense->timestamp)
+            || category_find_by_id(categories, expense->category_id) == NULL
+            || memchr(expense->note, '\0', sizeof(expense->note)) == NULL
+            || text_has_line_break(expense->note)) {
+            return 0;
+        }
+
+        if (expense->id > highest_id) {
+            highest_id = expense->id;
+        }
+
+        for (size_t other_index = 0; other_index < index; other_index++) {
+            if (expenses->items[other_index].id == expense->id) {
+                return 0;
+            }
+        }
+    }
+
+    if (highest_id == INT_MAX) {
+        return expenses->next_id == INT_MAX;
+    }
+
+    return expenses->next_id > highest_id;
 }
 
 StorageResult storage_save(
@@ -256,18 +420,22 @@ StorageResult storage_save(
     char temporary_filename[4096];
     FILE *file;
     StorageResult result = STORAGE_SUCCESS;
+    int temporary_filename_length;
 
-    if (filename == NULL || categories == NULL || expenses == NULL) {
+    if (filename == NULL || categories == NULL || expenses == NULL
+        || !category_list_is_valid(categories)
+        || !expense_list_is_valid(categories, expenses)) {
         return STORAGE_INVALID_DATA;
     }
 
-    if (snprintf(
+    temporary_filename_length = snprintf(
             temporary_filename,
             sizeof(temporary_filename),
             "%s.tmp",
             filename
-        ) < 0
-        || strlen(filename) + 4 >= sizeof(temporary_filename)) {
+        );
+    if (temporary_filename_length < 0
+        || (size_t)temporary_filename_length >= sizeof(temporary_filename)) {
         return STORAGE_FILE_ERROR;
     }
 
@@ -330,13 +498,19 @@ StorageResult storage_save(
     }
 
     if (result == STORAGE_SUCCESS) {
-        if (rename(temporary_filename, filename) != 0) {
-            if (remove(filename) != 0 && errno != ENOENT) {
-                result = STORAGE_FILE_ERROR;
-            } else if (rename(temporary_filename, filename) != 0) {
-                result = STORAGE_FILE_ERROR;
-            }
+#ifdef _WIN32
+        if (!MoveFileExA(
+                temporary_filename,
+                filename,
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
+            )) {
+            result = STORAGE_FILE_ERROR;
         }
+#else
+        if (rename(temporary_filename, filename) != 0) {
+            result = STORAGE_FILE_ERROR;
+        }
+#endif
     }
 
     if (result != STORAGE_SUCCESS) {
@@ -356,15 +530,21 @@ StorageResult storage_load(
     char line[MAX_LINE_LENGTH];
     char *fields[1];
     size_t field_count = 1;
-    size_t category_count;
-    size_t expense_count;
+    size_t category_count = 0;
+    size_t expense_count = 0;
     int persisted_next_id = 1;
     int is_legacy_format = 0;
     CategoryList loaded_categories;
     ExpenseList loaded_expenses;
     StorageResult result = STORAGE_SUCCESS;
 
-    if (filename == NULL || categories == NULL || expenses == NULL) {
+    if (filename == NULL || categories == NULL || expenses == NULL
+        || categories->size > categories->capacity
+        || (categories->size > 0 && categories->items == NULL)
+        || categories->capacity > SIZE_MAX / sizeof(*categories->items)
+        || expenses->size > expenses->capacity
+        || (expenses->size > 0 && expenses->items == NULL)
+        || expenses->capacity > SIZE_MAX / sizeof(*expenses->items)) {
         return STORAGE_INVALID_DATA;
     }
 

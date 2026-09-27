@@ -12,24 +12,53 @@ static int read_line(char *buffer, size_t buffer_size)
 {
     size_t length;
     int character;
+    int pending_carriage_return = 0;
+    int too_long = 0;
+    int read_anything = 0;
 
-    if (fgets(buffer, (int)buffer_size, stdin) == NULL) {
+    if (buffer == NULL || buffer_size < 2) {
+        return -1;
+    }
+
+    length = 0;
+    while ((character = getchar()) != EOF && character != '\n') {
+        read_anything = 1;
+        if (character != '\n' && pending_carriage_return) {
+            if (length + 1 < buffer_size && !too_long) {
+                buffer[length++] = '\r';
+            } else {
+                too_long = 1;
+            }
+            pending_carriage_return = 0;
+        }
+
+        if (character == '\r') {
+            pending_carriage_return = 1;
+        } else if (character == '\0' || length + 1 >= buffer_size) {
+            too_long = 1;
+        } else if (!too_long) {
+            buffer[length++] = (char)character;
+        }
+    }
+
+    if (ferror(stdin)) {
+        return -1;
+    }
+
+    if (pending_carriage_return) {
+        if (length + 1 < buffer_size && !too_long) {
+            buffer[length++] = '\r';
+        } else {
+            too_long = 1;
+        }
+    }
+
+    if (!read_anything && length == 0 && character == EOF) {
         return 0;
     }
 
-    length = strlen(buffer);
-    if (length > 0 && buffer[length - 1] == '\n') {
-        buffer[length - 1] = '\0';
-        if (length > 1 && buffer[length - 2] == '\r') {
-            buffer[length - 2] = '\0';
-        }
-        return 1;
-    }
-
-    while ((character = getchar()) != '\n' && character != EOF) {
-    }
-
-    return -1;
+    buffer[length] = '\0';
+    return too_long ? -1 : 1;
 }
 
 static int parse_integer(const char *input, int *value)
@@ -244,7 +273,8 @@ void expense_management_delete(ExpenseList *expenses)
         return;
     }
 
-    if (input[0] != 'Y' && input[0] != 'y') {
+    if ((input[0] != 'Y' && input[0] != 'y')
+        || input[1] != '\0') {
         printf("Deletion cancelled.\n");
         return;
     }

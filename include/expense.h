@@ -45,6 +45,7 @@ ExpenseResult expense_list_add(ExpenseList *list, Expense expense);
 ExpenseResult expense_next_id(const ExpenseList *list, int *next_id);
 ExpenseResult expense_create(
     ExpenseList *list,
+    const CategoryList *categories,
     int category_id,
     int64_t amount_paise,
     const char *note

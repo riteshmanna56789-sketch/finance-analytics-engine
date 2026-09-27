@@ -9,6 +9,44 @@
 
 static const size_t INITIAL_CAPACITY = 4;
 
+static int timestamp_is_valid(const Timestamp *timestamp)
+{
+    int days_in_month;
+
+    if (timestamp->year < 1
+        || timestamp->month < 1 || timestamp->month > 12
+        || timestamp->day < 1
+        || timestamp->hour < 0 || timestamp->hour > 23
+        || timestamp->minute < 0 || timestamp->minute > 59
+        || timestamp->second < 0 || timestamp->second > 60) {
+        return 0;
+    }
+
+    days_in_month = 31;
+    if (timestamp->month == 4 || timestamp->month == 6
+        || timestamp->month == 9 || timestamp->month == 11) {
+        days_in_month = 30;
+    } else if (timestamp->month == 2) {
+        int leap_year = timestamp->year % 400 == 0
+            || (timestamp->year % 4 == 0 && timestamp->year % 100 != 0);
+        days_in_month = leap_year ? 29 : 28;
+    }
+
+    return timestamp->day <= days_in_month;
+}
+
+static int note_is_single_line(const char *note)
+{
+    while (*note != '\0') {
+        if (*note == '\r' || *note == '\n') {
+            return 0;
+        }
+        note++;
+    }
+
+    return 1;
+}
+
 static const char *skip_spaces(const char *input)
 {
     while (isspace((unsigned char)*input)) {
@@ -20,6 +58,10 @@ static const char *skip_spaces(const char *input)
 
 void expense_list_init(ExpenseList *list)
 {
+    if (list == NULL) {
+        return;
+    }
+
     list->items = NULL;
     list->size = 0;
     list->capacity = 0;
@@ -28,14 +70,39 @@ void expense_list_init(ExpenseList *list)
 
 ExpenseResult expense_list_add(ExpenseList *list, Expense expense)
 {
-    if (list == NULL) {
+    if (list == NULL || expense.id < 1 || expense.category_id < 1
+        || expense.amount_paise <= 0
+        || !timestamp_is_valid(&expense.timestamp)
+        || memchr(expense.note, '\0', sizeof(expense.note)) == NULL
+        || !note_is_single_line(expense.note)
+        || list->size > list->capacity
+        || (list->size > 0 && list->items == NULL)
+        || list->capacity > SIZE_MAX / sizeof(*list->items)) {
         return EXPENSE_INVALID_INPUT;
     }
 
+    for (size_t index = 0; index < list->size; index++) {
+        if (list->items[index].id == expense.id) {
+            return EXPENSE_INVALID_INPUT;
+        }
+    }
+
     if (list->size == list->capacity) {
-        size_t new_capacity = list->capacity == 0
-            ? INITIAL_CAPACITY
-            : list->capacity * 2;
+        size_t new_capacity;
+
+        if (list->capacity == 0) {
+            new_capacity = INITIAL_CAPACITY;
+        } else {
+            if (list->capacity > SIZE_MAX / 2) {
+                return EXPENSE_MEMORY_ERROR;
+            }
+            new_capacity = list->capacity * 2;
+        }
+
+        if (new_capacity > SIZE_MAX / sizeof(*list->items)) {
+            return EXPENSE_MEMORY_ERROR;
+        }
+
         Expense *resized_items = realloc(
             list->items,
             new_capacity * sizeof(*resized_items)
@@ -63,6 +130,7 @@ ExpenseResult expense_list_add(ExpenseList *list, Expense expense)
 
 ExpenseResult expense_create(
     ExpenseList *list,
+    const CategoryList *categories,
     int category_id,
     int64_t amount_paise,
     const char *note
@@ -73,13 +141,31 @@ ExpenseResult expense_create(
     time_t current_time;
     struct tm *local_time;
     size_t note_length;
+    const Category *category;
+    size_t maximum_note_length = sizeof(((Expense *)0)->note) - 1;
 
-    if (list == NULL || category_id < 1 || amount_paise <= 0 || note == NULL) {
+    if (list == NULL || categories == NULL || category_id < 1
+        || amount_paise <= 0 || note == NULL
+        || list->size > list->capacity
+        || (list->size > 0 && list->items == NULL)
+        || categories->size > categories->capacity
+        || (categories->size > 0 && categories->items == NULL)) {
         return EXPENSE_INVALID_INPUT;
     }
 
-    note_length = strlen(note);
-    if (note_length >= sizeof(expense.note)) {
+    category = category_find_by_id(categories, category_id);
+    if (category == NULL) {
+        return EXPENSE_CATEGORY_NOT_FOUND;
+    }
+    if (!category->is_active) {
+        return EXPENSE_CATEGORY_INACTIVE;
+    }
+
+    note_length = 0;
+    while (note_length <= maximum_note_length && note[note_length] != '\0') {
+        note_length++;
+    }
+    if (note_length > maximum_note_length || !note_is_single_line(note)) {
         return EXPENSE_INVALID_INPUT;
     }
 
@@ -109,7 +195,10 @@ ExpenseResult expense_create(
 
 ExpenseResult expense_next_id(const ExpenseList *list, int *next_id)
 {
-    if (list == NULL || next_id == NULL) {
+    if (list == NULL || next_id == NULL
+        || list->size > list->capacity
+        || (list->size > 0 && list->items == NULL)
+        || list->next_id < 1) {
         return EXPENSE_INVALID_INPUT;
     }
 
@@ -132,7 +221,8 @@ const Expense *expense_find_by_id(
     int expense_id
 )
 {
-    if (list == NULL || expense_id < 1) {
+    if (list == NULL || expense_id < 1 || list->size > list->capacity
+        || (list->size > 0 && list->items == NULL)) {
         return NULL;
     }
 
@@ -157,9 +247,16 @@ ExpenseResult expense_update(
     Expense *expense = NULL;
     const Category *category;
     size_t note_length;
+    size_t maximum_note_length = sizeof(((Expense *)0)->note) - 1;
 
     if (list == NULL || categories == NULL || expense_id < 1
         || amount_paise <= 0 || category_id < 1 || note == NULL) {
+        return EXPENSE_INVALID_INPUT;
+    }
+    if (list->size > list->capacity
+        || (list->size > 0 && list->items == NULL)
+        || categories->size > categories->capacity
+        || (categories->size > 0 && categories->items == NULL)) {
         return EXPENSE_INVALID_INPUT;
     }
 
@@ -174,8 +271,11 @@ ExpenseResult expense_update(
         return EXPENSE_NOT_FOUND;
     }
 
-    note_length = strlen(note);
-    if (note_length >= sizeof(expense->note)) {
+    note_length = 0;
+    while (note_length <= maximum_note_length && note[note_length] != '\0') {
+        note_length++;
+    }
+    if (note_length > maximum_note_length || !note_is_single_line(note)) {
         return EXPENSE_INVALID_INPUT;
     }
 
@@ -198,7 +298,9 @@ ExpenseResult expense_delete(ExpenseList *list, int expense_id)
 {
     size_t index;
 
-    if (list == NULL || expense_id < 1) {
+    if (list == NULL || expense_id < 1
+        || list->size > list->capacity
+        || (list->size > 0 && list->items == NULL)) {
         return EXPENSE_INVALID_INPUT;
     }
 
@@ -236,6 +338,7 @@ ExpenseResult expense_parse_amount_paise(
     int has_digit = 0;
     int has_decimal = 0;
     const uint64_t maximum_paise = INT64_MAX;
+    const uint64_t maximum_whole = INT64_MAX / 100;
 
     if (input == NULL || amount_paise == NULL) {
         return EXPENSE_INVALID_INPUT;
@@ -249,7 +352,7 @@ ExpenseResult expense_parse_amount_paise(
     while (isdigit((unsigned char)*cursor)) {
         unsigned int digit = (unsigned int)(*cursor - '0');
 
-        if (whole > (maximum_paise - digit) / 100) {
+        if (whole > (maximum_whole - digit) / 10) {
             return EXPENSE_INVALID_INPUT;
         }
         whole = whole * 10 + digit;

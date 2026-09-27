@@ -86,7 +86,11 @@ SortingResult sorting_create_view(
 {
     if (expenses == NULL || categories == NULL || view == NULL
         || option < SORT_BY_DATE_NEWEST
-        || option > SORT_BY_CATEGORY_ASCENDING) {
+        || option > SORT_BY_CATEGORY_ASCENDING
+        || expenses->size > expenses->capacity
+        || (expenses->size > 0 && expenses->items == NULL)
+        || categories->size > categories->capacity
+        || (categories->size > 0 && categories->items == NULL)) {
         return SORTING_INVALID_INPUT;
     }
 

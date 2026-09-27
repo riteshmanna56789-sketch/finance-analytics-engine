@@ -106,36 +106,12 @@ static int same_date(const Timestamp *left, const struct tm *right)
         && left->day == right->tm_mday;
 }
 
-static time_t timestamp_date(const Timestamp *timestamp)
-{
-    struct tm date = {0};
-
-    date.tm_year = timestamp->year - 1900;
-    date.tm_mon = timestamp->month - 1;
-    date.tm_mday = timestamp->day;
-    date.tm_hour = 12;
-    date.tm_isdst = -1;
-    return mktime(&date);
-}
-
-static time_t next_week_start(const struct tm *current_time)
-{
-    struct tm date = *current_time;
-
-    date.tm_hour = 12;
-    date.tm_min = 0;
-    date.tm_sec = 0;
-    date.tm_mday += 7 - date.tm_wday;
-    date.tm_isdst = -1;
-    return mktime(&date);
-}
-
 static int matches_time(
     const Timestamp *timestamp,
     QueryTimeFilter filter,
     const struct tm *current_time,
-    time_t week_start,
-    time_t next_week_start
+    QueryDate week_start,
+    QueryDate following_week_start
 )
 {
     if (filter == QUERY_TODAY) {
@@ -150,8 +126,9 @@ static int matches_time(
     }
 
     {
-        time_t expense_date = timestamp_date(timestamp);
-        return expense_date >= week_start && expense_date < next_week_start;
+        QueryDate date = {timestamp->year, timestamp->month, timestamp->day};
+        return compare_dates(date, week_start) >= 0
+            && compare_dates(date, following_week_start) < 0;
     }
 }
 
@@ -160,7 +137,9 @@ static QueryResult validate_query_inputs(
     QueryMatchCallback callback
 )
 {
-    if (expenses == NULL || callback == NULL) {
+    if (expenses == NULL || callback == NULL
+        || expenses->size > expenses->capacity
+        || (expenses->size > 0 && expenses->items == NULL)) {
         return QUERY_INVALID_INPUT;
     }
 
@@ -219,9 +198,10 @@ QueryResult query_by_time(
 )
 {
     time_t now;
-    time_t week_start;
-    time_t following_week_start;
+    QueryDate week_start;
+    QueryDate following_week_start;
     struct tm *current_time;
+    struct tm week_date;
     QueryResult result = validate_query_inputs(expenses, callback);
 
     if (result != QUERY_SUCCESS
@@ -235,15 +215,30 @@ QueryResult query_by_time(
         return QUERY_TIME_ERROR;
     }
 
-    week_start = timestamp_date(&(Timestamp){
-        current_time->tm_year + 1900,
-        current_time->tm_mon + 1,
-        current_time->tm_mday - current_time->tm_wday,
-        0,
-        0,
-        0
-    });
-    following_week_start = next_week_start(current_time);
+    week_date = *current_time;
+    week_date.tm_mday -= week_date.tm_wday;
+    week_date.tm_hour = 12;
+    week_date.tm_min = 0;
+    week_date.tm_sec = 0;
+    week_date.tm_isdst = -1;
+    if (mktime(&week_date) == (time_t)-1) {
+        return QUERY_TIME_ERROR;
+    }
+    week_start = (QueryDate){
+        week_date.tm_year + 1900,
+        week_date.tm_mon + 1,
+        week_date.tm_mday
+    };
+
+    week_date.tm_mday += 7;
+    if (mktime(&week_date) == (time_t)-1) {
+        return QUERY_TIME_ERROR;
+    }
+    following_week_start = (QueryDate){
+        week_date.tm_year + 1900,
+        week_date.tm_mon + 1,
+        week_date.tm_mday
+    };
 
     for (size_t index = 0; index < expenses->size; index++) {
         if (matches_time(

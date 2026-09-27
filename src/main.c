@@ -30,27 +30,53 @@ static int read_line(char *buffer, size_t buffer_size)
 {
     size_t length;
     int character;
+    int pending_carriage_return = 0;
+    int too_long = 0;
+    int read_anything = 0;
 
-    if (fgets(buffer, buffer_size, stdin) == NULL) {
+    if (buffer == NULL || buffer_size < 2) {
+        return -1;
+    }
+
+    length = 0;
+    while ((character = getchar()) != EOF && character != '\n') {
+        read_anything = 1;
+        if (character != '\n' && pending_carriage_return) {
+            if (length + 1 < buffer_size && !too_long) {
+                buffer[length++] = '\r';
+            } else {
+                too_long = 1;
+            }
+            pending_carriage_return = 0;
+        }
+
+        if (character == '\r') {
+            pending_carriage_return = 1;
+        } else if (character == '\0' || length + 1 >= buffer_size) {
+            too_long = 1;
+        } else if (!too_long) {
+            buffer[length++] = (char)character;
+        }
+    }
+
+    if (ferror(stdin)) {
+        return -1;
+    }
+
+    if (pending_carriage_return) {
+        if (length + 1 < buffer_size && !too_long) {
+            buffer[length++] = '\r';
+        } else {
+            too_long = 1;
+        }
+    }
+
+    if (!read_anything && length == 0 && character == EOF) {
         return 0;
     }
 
-    length = strlen(buffer);
-
-    if (length > 0 && buffer[length - 1] == '\n') {
-        buffer[length - 1] = '\0';
-
-        if (length > 1 && buffer[length - 2] == '\r') {
-            buffer[length - 2] = '\0';
-        }
-
-        return 1;
-    }
-
-    while ((character = getchar()) != '\n' && character != EOF) {
-    }
-
-    return -1;
+    buffer[length] = '\0';
+    return too_long ? -1 : 1;
 }
 
 static int parse_menu_choice(const char *input, int *choice)
@@ -379,6 +405,7 @@ static int add_expense(
 
     result = expense_create(
         expenses,
+        categories,
         category_id,
         amount_paise,
         note
@@ -720,16 +747,26 @@ static void filter_by_time(
 
 static int parse_query_date(const char *input, QueryDate *date)
 {
-    char extra;
+    if (input == NULL || date == NULL
+        || strlen(input) != 10
+        || input[4] != '-' || input[7] != '-') {
+        return 0;
+    }
 
-    return sscanf(
-        input,
-        "%d-%d-%d %c",
-        &date->year,
-        &date->month,
-        &date->day,
-        &extra
-    ) == 3;
+    for (size_t index = 0; index < 10; index++) {
+        if (index != 4 && index != 7
+            && (input[index] < '0' || input[index] > '9')) {
+            return 0;
+        }
+    }
+
+    date->year = (input[0] - '0') * 1000
+        + (input[1] - '0') * 100
+        + (input[2] - '0') * 10
+        + input[3] - '0';
+    date->month = (input[5] - '0') * 10 + input[6] - '0';
+    date->day = (input[8] - '0') * 10 + input[9] - '0';
+    return 1;
 }
 
 static void display_query_results(
@@ -791,6 +828,57 @@ static int select_query_category(
     return 1;
 }
 
+static int parse_range_amount(const char *input, int64_t *amount_paise)
+{
+    {
+        const char *cursor = input;
+        int has_digit = 0;
+        int has_decimal = 0;
+        int fractional_digits = 0;
+        int all_zero = 1;
+
+        while (isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+        while (*cursor >= '0' && *cursor <= '9') {
+            has_digit = 1;
+            if (*cursor != '0') {
+                all_zero = 0;
+            }
+            cursor++;
+        }
+        if (*cursor == '.') {
+            has_decimal = 1;
+            cursor++;
+            while (*cursor >= '0' && *cursor <= '9') {
+                has_digit = 1;
+                fractional_digits++;
+                if (*cursor != '0') {
+                    all_zero = 0;
+                }
+                cursor++;
+            }
+        }
+        while (isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+
+        if (has_digit && *cursor == '\0'
+            && (!has_decimal || (fractional_digits > 0
+                && fractional_digits <= 2))
+            && all_zero) {
+            *amount_paise = 0;
+        } else if (expense_parse_amount_paise(
+                input,
+                amount_paise
+            ) != EXPENSE_SUCCESS) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static int read_amount_range(
     int64_t *minimum_amount_paise,
     int64_t *maximum_amount_paise
@@ -799,33 +887,15 @@ static int read_amount_range(
     char input[100];
 
     printf("Minimum amount: Rs.");
-    if (read_line(input, sizeof(input)) <= 0) {
-        printf("Invalid minimum amount.\n");
-        return 0;
-    }
-    if (strcmp(input, "0") == 0 || strcmp(input, "0.0") == 0
-        || strcmp(input, "0.00") == 0) {
-        *minimum_amount_paise = 0;
-    } else if (expense_parse_amount_paise(
-            input,
-            minimum_amount_paise
-        ) != EXPENSE_SUCCESS) {
+    if (read_line(input, sizeof(input)) <= 0
+        || !parse_range_amount(input, minimum_amount_paise)) {
         printf("Invalid minimum amount.\n");
         return 0;
     }
 
     printf("Maximum amount: Rs.");
-    if (read_line(input, sizeof(input)) <= 0) {
-        printf("Invalid maximum amount.\n");
-        return 0;
-    }
-    if (strcmp(input, "0") == 0 || strcmp(input, "0.0") == 0
-        || strcmp(input, "0.00") == 0) {
-        *maximum_amount_paise = 0;
-    } else if (expense_parse_amount_paise(
-            input,
-            maximum_amount_paise
-        ) != EXPENSE_SUCCESS) {
+    if (read_line(input, sizeof(input)) <= 0
+        || !parse_range_amount(input, maximum_amount_paise)) {
         printf("Invalid maximum amount.\n");
         return 0;
     }
@@ -868,7 +938,7 @@ static int search_by_note(
     QueryFilter filter = {0};
 
     printf("Note contains: ");
-    if (read_line(note, sizeof(note)) < 0) {
+    if (read_line(note, sizeof(note)) <= 0) {
         printf("Note search text is too long.\n");
         return 1;
     }
@@ -959,7 +1029,7 @@ static int search_by_combined_filters(
             filter.date_enabled = 1;
         } else if (choice == 4) {
             printf("Note contains: ");
-            if (read_line(note, sizeof(note)) < 0) {
+            if (read_line(note, sizeof(note)) <= 0) {
                 printf("Note search text is too long.\n");
                 return 1;
             }
