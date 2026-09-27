@@ -299,6 +299,171 @@ int main(void)
     assert(summary.category_totals_paise[3] == 100);
     analytics_summary_destroy(&summary);
     {
+        ExpenseList same_day;
+        Timestamp date = {2026, 9, 20, 0, 0, 0};
+        expense_list_init(&same_day);
+        assert(expense_list_add(
+            &same_day,
+            make_expense(1, 3, 2026, 9, 20, 100, "inactive category")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &same_day,
+            make_expense(2, 999, 2026, 9, 20, 200, "unknown category")
+        ) == EXPENSE_SUCCESS);
+        assert(analytics_calculate_daily_summary(
+            &same_day,
+            &date,
+            &summary
+        ) == ANALYTICS_SUCCESS);
+        assert(summary.transaction_count == 2);
+        assert(summary.total_paise == 300);
+        assert(summary.average_paise == 150);
+        assert(summary.average_remainder_paise == 0);
+        assert(summary.minimum_paise == 100);
+        assert(summary.maximum_paise == 200);
+        analytics_summary_destroy(&summary);
+        expense_list_destroy(&same_day);
+    }
+    {
+        Timestamp date = {2026, 9, 20, 0, 0, 0};
+        Timestamp start = {2026, 9, 20, 0, 0, 0};
+        Timestamp end = {2026, 9, 21, 0, 0, 0};
+
+        assert(analytics_calculate_daily_summary(
+            &expenses,
+            &date,
+            &summary
+        ) == ANALYTICS_SUCCESS);
+        assert(summary.transaction_count == 1);
+        assert(summary.total_paise == 100);
+        assert(summary.average_paise == 100);
+        assert(summary.average_remainder_paise == 0);
+        assert(summary.minimum_paise == 100 && summary.maximum_paise == 100);
+        analytics_summary_destroy(&summary);
+
+        date.day = 22;
+        assert(analytics_calculate_daily_summary(
+            &expenses,
+            &date,
+            &summary
+        ) == ANALYTICS_SUCCESS);
+        assert(summary.transaction_count == 0);
+        assert(summary.total_paise == 0);
+        assert(summary.minimum_paise == 0 && summary.maximum_paise == 0);
+        analytics_summary_destroy(&summary);
+
+        assert(analytics_calculate_yearly_summary(
+            &expenses,
+            2025,
+            &summary
+        ) == ANALYTICS_SUCCESS);
+        assert(summary.transaction_count == 0);
+        assert(summary.total_paise == 0);
+        analytics_summary_destroy(&summary);
+
+        assert(analytics_calculate_monthly_summary(
+            &expenses,
+            2026,
+            9,
+            &summary
+        ) == ANALYTICS_SUCCESS);
+        assert(summary.transaction_count == 2);
+        assert(summary.total_paise == 10101);
+        assert(summary.average_paise == 5050);
+        assert(summary.average_remainder_paise == 1);
+        assert(summary.minimum_paise == 100);
+        assert(summary.maximum_paise == 10001);
+        analytics_summary_destroy(&summary);
+
+        assert(analytics_calculate_yearly_summary(
+            &expenses,
+            2026,
+            &summary
+        ) == ANALYTICS_SUCCESS);
+        assert(summary.transaction_count == 2);
+        assert(summary.total_paise == 10101);
+        analytics_summary_destroy(&summary);
+
+        assert(analytics_calculate_date_range_summary(
+            &expenses,
+            &start,
+            &end,
+            &summary
+        ) == ANALYTICS_SUCCESS);
+        assert(summary.transaction_count == 2);
+        assert(summary.total_paise == 10101);
+        assert(summary.minimum_paise == 100);
+        assert(summary.maximum_paise == 10001);
+        analytics_summary_destroy(&summary);
+
+        assert(analytics_calculate_date_range_summary(
+            &expenses,
+            &start,
+            &start,
+            &summary
+        ) == ANALYTICS_SUCCESS);
+        assert(summary.transaction_count == 1 && summary.total_paise == 100);
+        analytics_summary_destroy(&summary);
+        assert(analytics_calculate_date_range_summary(
+            &expenses,
+            &end,
+            &end,
+            &summary
+        ) == ANALYTICS_SUCCESS);
+        assert(summary.transaction_count == 1
+            && summary.total_paise == 10001);
+        analytics_summary_destroy(&summary);
+
+        assert(analytics_calculate_date_range_summary(
+            &expenses,
+            &end,
+            &start,
+            &summary
+        ) == ANALYTICS_INVALID_INPUT);
+        assert(analytics_calculate_monthly_summary(
+            &expenses,
+            2026,
+            13,
+            &summary
+        ) == ANALYTICS_INVALID_INPUT);
+
+        date = (Timestamp){2026, 2, 30, 0, 0, 0};
+        assert(analytics_calculate_daily_summary(
+            &expenses,
+            &date,
+            &summary
+        ) == ANALYTICS_INVALID_INPUT);
+    }
+    {
+        Timestamp leap_day = {2024, 2, 29, 0, 0, 0};
+        int original_category_id = expenses.items[0].category_id;
+
+        assert(expense_date_is_valid(2028, 2, 29));
+        assert(!expense_date_is_valid(2026, 2, 29));
+        assert(expenses.items[0].category_id == 3);
+        assert(!category_find_by_id(&categories, 3)->is_active);
+
+        assert(analytics_calculate_daily_summary(
+            &expenses,
+            &leap_day,
+            &summary
+        ) == ANALYTICS_SUCCESS);
+        assert(summary.transaction_count == 1);
+        assert(summary.total_paise == 1);
+        assert(summary.minimum_paise == 1 && summary.maximum_paise == 1);
+        analytics_summary_destroy(&summary);
+
+        expenses.items[0].category_id = 999;
+        assert(analytics_calculate_daily_summary(
+            &expenses,
+            &leap_day,
+            &summary
+        ) == ANALYTICS_SUCCESS);
+        assert(summary.total_paise == 1 && summary.transaction_count == 1);
+        analytics_summary_destroy(&summary);
+        expenses.items[0].category_id = original_category_id;
+    }
+    {
         int original_category_id = expenses.items[0].category_id;
 
         expenses.items[0].category_id = 999;
@@ -312,7 +477,220 @@ int main(void)
     }
 
     {
+        ExpenseList breakdown_expenses;
+        AnalyticsCategoryBreakdown breakdown;
+        AnalyticsPeriod period = {0};
+        unsigned int percentage_sum;
+
+        expense_list_init(&breakdown_expenses);
+        assert(expense_list_add(
+            &breakdown_expenses,
+            make_expense(30, 3, 2026, 9, 20, 300, "inactive A")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &breakdown_expenses,
+            make_expense(31, 2, 2026, 9, 20, 200, "category B")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &breakdown_expenses,
+            make_expense(32, 3, 2026, 9, 20, 500, "inactive A again")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &breakdown_expenses,
+            make_expense(33, 2, 2026, 9, 21, 500, "category B next day")
+        ) == EXPENSE_SUCCESS);
+        assert(expense_list_add(
+            &breakdown_expenses,
+            make_expense(34, 4, 2025, 12, 31, 2000, "previous year")
+        ) == EXPENSE_SUCCESS);
+
+        assert(analytics_calculate_category_breakdown(
+            &breakdown_expenses,
+            &categories,
+            NULL,
+            &breakdown
+        ) == ANALYTICS_SUCCESS);
+        assert(breakdown.size == 3);
+        assert(breakdown.transaction_count == 5);
+        assert(breakdown.total_paise == 3500);
+        assert(breakdown.items[0].category_id == 3);
+        assert(strcmp(breakdown.items[0].category_name, "Petrol") == 0);
+        assert(breakdown.items[0].total_paise == 800);
+        assert(breakdown.items[0].transaction_count == 2);
+        assert(breakdown.items[0].percentage_basis_points == 2286);
+        assert(breakdown.items[1].category_id == 2);
+        assert(breakdown.items[1].total_paise == 700);
+        assert(breakdown.items[1].transaction_count == 2);
+        assert(breakdown.items[1].percentage_basis_points == 2000);
+        assert(breakdown.items[2].category_id == 4);
+        assert(breakdown.items[2].total_paise == 2000);
+        assert(breakdown.items[2].transaction_count == 1);
+        assert(breakdown.items[2].percentage_basis_points == 5714);
+        percentage_sum = breakdown.items[0].percentage_basis_points
+            + breakdown.items[1].percentage_basis_points
+            + breakdown.items[2].percentage_basis_points;
+        assert(percentage_sum == 10000);
+        analytics_category_breakdown_destroy(&breakdown);
+        assert(breakdown.items == NULL && breakdown.size == 0);
+
+        period.type = ANALYTICS_PERIOD_DAY;
+        period.date = (Timestamp){2026, 9, 20, 0, 0, 0};
+        assert(analytics_calculate_category_breakdown(
+            &breakdown_expenses,
+            &categories,
+            &period,
+            &breakdown
+        ) == ANALYTICS_SUCCESS);
+        assert(breakdown.size == 2);
+        assert(breakdown.total_paise == 1000);
+        assert(breakdown.items[0].total_paise == 800);
+        assert(breakdown.items[0].transaction_count == 2);
+        assert(breakdown.items[0].percentage_basis_points == 8000);
+        assert(breakdown.items[1].total_paise == 200);
+        assert(breakdown.items[1].percentage_basis_points == 2000);
+        analytics_category_breakdown_destroy(&breakdown);
+
+        period.type = ANALYTICS_PERIOD_MONTH;
+        period.year = 2026;
+        period.month = 9;
+        assert(analytics_calculate_category_breakdown(
+            &breakdown_expenses,
+            &categories,
+            &period,
+            &breakdown
+        ) == ANALYTICS_SUCCESS);
+        assert(breakdown.transaction_count == 4);
+        assert(breakdown.total_paise == 1500);
+        assert(breakdown.items[0].total_paise == 800);
+        assert(breakdown.items[1].total_paise == 700);
+        analytics_category_breakdown_destroy(&breakdown);
+
+        period.type = ANALYTICS_PERIOD_YEAR;
+        period.year = 2025;
+        assert(analytics_calculate_category_breakdown(
+            &breakdown_expenses,
+            &categories,
+            &period,
+            &breakdown
+        ) == ANALYTICS_SUCCESS);
+        assert(breakdown.size == 1);
+        assert(breakdown.items[0].category_id == 4);
+        assert(breakdown.items[0].total_paise == 2000);
+        assert(breakdown.items[0].percentage_basis_points == 10000);
+        analytics_category_breakdown_destroy(&breakdown);
+
+        period.type = ANALYTICS_PERIOD_DATE_RANGE;
+        period.start_date = (Timestamp){2026, 9, 20, 0, 0, 0};
+        period.end_date = (Timestamp){2026, 9, 21, 0, 0, 0};
+        assert(analytics_calculate_category_breakdown(
+            &breakdown_expenses,
+            &categories,
+            &period,
+            &breakdown
+        ) == ANALYTICS_SUCCESS);
+        assert(breakdown.transaction_count == 4);
+        assert(breakdown.total_paise == 1500);
+        analytics_category_breakdown_destroy(&breakdown);
+
+        period.type = ANALYTICS_PERIOD_DATE_RANGE;
+        period.start_date = (Timestamp){2026, 9, 21, 0, 0, 0};
+        period.end_date = period.start_date;
+        assert(analytics_calculate_category_breakdown(
+            &breakdown_expenses,
+            &categories,
+            &period,
+            &breakdown
+        ) == ANALYTICS_SUCCESS);
+        assert(breakdown.transaction_count == 1);
+        assert(breakdown.total_paise == 500);
+        assert(breakdown.items[0].category_id == 2);
+        analytics_category_breakdown_destroy(&breakdown);
+
+        period.type = ANALYTICS_PERIOD_YEAR;
+        period.year = 2027;
+        assert(analytics_calculate_category_breakdown(
+            &breakdown_expenses,
+            &categories,
+            &period,
+            &breakdown
+        ) == ANALYTICS_SUCCESS);
+        assert(breakdown.size == 0);
+        assert(breakdown.total_paise == 0);
+        assert(breakdown.transaction_count == 0);
+        analytics_category_breakdown_destroy(&breakdown);
+
+        period.type = ANALYTICS_PERIOD_MONTH;
+        period.year = 2026;
+        period.month = 13;
+        assert(analytics_calculate_category_breakdown(
+            &breakdown_expenses,
+            &categories,
+            &period,
+            &breakdown
+        ) == ANALYTICS_INVALID_INPUT);
+
+        period.type = ANALYTICS_PERIOD_ALL_TIME;
+        assert(expense_list_add(
+            &breakdown_expenses,
+            make_expense(35, 999, 2026, 9, 20, 10, "missing category")
+        ) == EXPENSE_SUCCESS);
+        assert(analytics_calculate_category_breakdown(
+            &breakdown_expenses,
+            &categories,
+            NULL,
+            &breakdown
+        ) == ANALYTICS_INVALID_CATEGORY);
+        assert(breakdown.items == NULL && breakdown.size == 0);
+
+        expense_list_destroy(&breakdown_expenses);
+    }
+    {
+        CategoryList growth_categories;
+        ExpenseList growth_expenses;
+        AnalyticsCategoryBreakdown breakdown;
+
+        category_list_init(&growth_categories);
+        expense_list_init(&growth_expenses);
+        for (int index = 0; index < 5; index++) {
+            char name[16];
+            Expense expense;
+
+            assert(snprintf(name, sizeof(name), "Group %d", index + 1) > 0);
+            assert(category_create(&growth_categories, name)
+                == CATEGORY_SUCCESS);
+            expense = make_expense(
+                index + 1,
+                index + 1,
+                2026,
+                9,
+                20,
+                100,
+                "growth"
+            );
+            assert(expense_list_add(&growth_expenses, expense)
+                == EXPENSE_SUCCESS);
+        }
+        assert(analytics_calculate_category_breakdown(
+            &growth_expenses,
+            &growth_categories,
+            NULL,
+            &breakdown
+        ) == ANALYTICS_SUCCESS);
+        assert(breakdown.size == 5 && breakdown.capacity >= 5);
+        assert(breakdown.total_paise == 500);
+        for (size_t index = 0; index < breakdown.size; index++) {
+            assert(breakdown.items[index].transaction_count == 1);
+            assert(breakdown.items[index].total_paise == 100);
+            assert(breakdown.items[index].percentage_basis_points == 2000);
+        }
+        analytics_category_breakdown_destroy(&breakdown);
+        expense_list_destroy(&growth_expenses);
+        category_list_destroy(&growth_categories);
+    }
+
+    {
         ExpenseList one_expense;
+        AnalyticsCategoryBreakdown breakdown;
         expense_list_init(&one_expense);
         assert(expense_list_add(
             &one_expense,
@@ -329,6 +707,57 @@ int main(void)
         assert(summary.minimum_paise == INT64_MAX);
         assert(summary.maximum_paise == INT64_MAX);
         analytics_summary_destroy(&summary);
+        {
+            Timestamp date = {2026, 9, 20, 0, 0, 0};
+            assert(analytics_calculate_daily_summary(
+                &one_expense,
+                &date,
+                &summary
+            ) == ANALYTICS_SUCCESS);
+            assert(summary.total_paise == INT64_MAX);
+            assert(summary.average_paise == INT64_MAX);
+            analytics_summary_destroy(&summary);
+        }
+        assert(analytics_calculate_category_breakdown(
+            &one_expense,
+            &categories,
+            NULL,
+            &breakdown
+        ) == ANALYTICS_SUCCESS);
+        assert(breakdown.size == 1);
+        assert(breakdown.total_paise == INT64_MAX);
+        assert(breakdown.items[0].total_paise == INT64_MAX);
+        assert(breakdown.items[0].percentage_basis_points == 10000);
+        analytics_category_breakdown_destroy(&breakdown);
+
+        {
+            Expense extra = make_expense(
+                21,
+                2,
+                2026,
+                9,
+                20,
+                1,
+                "overflow"
+            );
+            assert(expense_list_add(&one_expense, extra) == EXPENSE_SUCCESS);
+            assert(analytics_calculate_category_breakdown(
+                &one_expense,
+                &categories,
+                NULL,
+                &breakdown
+            ) == ANALYTICS_OVERFLOW);
+            assert(breakdown.items == NULL && breakdown.size == 0);
+            {
+                Timestamp date = {2026, 9, 20, 0, 0, 0};
+                assert(analytics_calculate_daily_summary(
+                    &one_expense,
+                    &date,
+                    &summary
+                ) == ANALYTICS_OVERFLOW);
+                assert(summary.category_totals_paise == NULL);
+            }
+        }
         expense_list_destroy(&one_expense);
     }
 

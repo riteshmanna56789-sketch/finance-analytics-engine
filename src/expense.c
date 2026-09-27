@@ -9,30 +9,37 @@
 
 static const size_t INITIAL_CAPACITY = 4;
 
-static int timestamp_is_valid(const Timestamp *timestamp)
+int expense_date_is_valid(int year, int month, int day)
 {
     int days_in_month;
 
-    if (timestamp->year < 1
-        || timestamp->month < 1 || timestamp->month > 12
-        || timestamp->day < 1
-        || timestamp->hour < 0 || timestamp->hour > 23
-        || timestamp->minute < 0 || timestamp->minute > 59
-        || timestamp->second < 0 || timestamp->second > 60) {
+    if (year < 1 || month < 1 || month > 12 || day < 1) {
         return 0;
     }
 
     days_in_month = 31;
-    if (timestamp->month == 4 || timestamp->month == 6
-        || timestamp->month == 9 || timestamp->month == 11) {
+    if (month == 4 || month == 6 || month == 9 || month == 11) {
         days_in_month = 30;
-    } else if (timestamp->month == 2) {
-        int leap_year = timestamp->year % 400 == 0
-            || (timestamp->year % 4 == 0 && timestamp->year % 100 != 0);
+    } else if (month == 2) {
+        int leap_year = year % 400 == 0
+            || (year % 4 == 0 && year % 100 != 0);
         days_in_month = leap_year ? 29 : 28;
     }
 
-    return timestamp->day <= days_in_month;
+    return day <= days_in_month;
+}
+
+static int timestamp_is_valid(const Timestamp *timestamp)
+{
+    return timestamp != NULL
+        && expense_date_is_valid(
+            timestamp->year,
+            timestamp->month,
+            timestamp->day
+        )
+        && timestamp->hour >= 0 && timestamp->hour <= 23
+        && timestamp->minute >= 0 && timestamp->minute <= 59
+        && timestamp->second >= 0 && timestamp->second <= 60;
 }
 
 static int note_is_single_line(const char *note)

@@ -5,23 +5,7 @@
 
 static int query_date_is_valid(QueryDate date)
 {
-    int days_in_month;
-
-    if (date.year < 1 || date.month < 1 || date.month > 12 || date.day < 1) {
-        return 0;
-    }
-
-    days_in_month = 31;
-    if (date.month == 4 || date.month == 6
-        || date.month == 9 || date.month == 11) {
-        days_in_month = 30;
-    } else if (date.month == 2) {
-        int leap_year = date.year % 400 == 0
-            || (date.year % 4 == 0 && date.year % 100 != 0);
-        days_in_month = leap_year ? 29 : 28;
-    }
-
-    return date.day <= days_in_month;
+    return expense_date_is_valid(date.year, date.month, date.day);
 }
 
 static int compare_dates(QueryDate left, QueryDate right)

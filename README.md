@@ -2,12 +2,12 @@
 
 ## Overview
 
-Finance Analytics Engine V1 is a single-user, offline C command-line expense
-tracker. The long-term project may evolve into a broader finance analytics
-engine, but V1 focuses on reliable expense recording, local storage,
-organization, querying, and basic spending analysis.
+Finance Analytics Engine is a single-user, offline C command-line expense
+tracker. The V1 foundation focuses on reliable expense recording, local
+storage, organization, and querying; V2 extends its analytics while retaining
+the same local CLI architecture.
 
-## Current V1 Features
+## Current Features
 
 - Add expenses with automatically assigned IDs and local timestamps.
 - Store money as integer paise using `int64_t`, without floating-point money
@@ -26,6 +26,12 @@ organization, querying, and basic spending analysis.
   canonical expense-list order.
 - View a spending summary with total, transaction count, exact integer
   average, minimum, maximum, today, current-month, and category totals.
+- Analyze spending by day, month, year, or inclusive custom date range,
+  including transaction count, total, average, minimum, and maximum.
+- View category spending breakdowns for all time or a selected day, month,
+  year, or inclusive date range, with per-category totals, transaction counts,
+  and percentages of the selected-period total. Historical spending remains
+  included for inactive categories.
 - Validate user input and stored records, including amounts, IDs, categories,
   dates, and string boundaries.
 - Run assertion-based hardening tests for data operations, querying, sorting,
@@ -50,9 +56,14 @@ Major module responsibilities:
 - **analytics** (`analytics.h`, `analytics.c`): checked total, today,
   current-month, and per-category spending calculations; transaction count,
   exact average representation, minimum, and maximum. Invalid category
-  references and total overflow are reported explicitly.
+  references and total overflow are reported explicitly. Day, month, year,
+  and inclusive date-range summaries use linear scans and do not depend on
+  category references. Category breakdowns group matching expenses, retain
+  first-seen category order, and compute percentages rounded to two decimal
+  places.
 - **analytics_ui** (`analytics_ui.h`, `analytics_ui.c`): presentation and
-  error messages for the spending summary, keeping summary UI out of `main`.
+  input for overall, time-based, and category-based spending summaries,
+  keeping analytics UI out of `main`.
 - **query** (`query.h`, `query.c`): category, amount, time, note, date/amount
   range, and combined expense queries.
 - **sorting** (`sorting.h`, `sorting.c`): stable sorting of a temporary

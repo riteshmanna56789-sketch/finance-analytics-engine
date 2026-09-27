@@ -40,6 +40,7 @@ typedef enum {
     EXPENSE_CATEGORY_INACTIVE
 } ExpenseResult;
 
+int expense_date_is_valid(int year, int month, int day);
 void expense_list_init(ExpenseList *list);
 ExpenseResult expense_list_add(ExpenseList *list, Expense expense);
 ExpenseResult expense_next_id(const ExpenseList *list, int *next_id);

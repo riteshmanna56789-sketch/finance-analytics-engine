@@ -244,28 +244,15 @@ static StorageResult load_category(
 
 static int timestamp_is_valid(const Timestamp *timestamp)
 {
-    int days_in_month;
-
-    if (timestamp->year < 1
-        || timestamp->month < 1 || timestamp->month > 12
-        || timestamp->day < 1
-        || timestamp->hour < 0 || timestamp->hour > 23
-        || timestamp->minute < 0 || timestamp->minute > 59
-        || timestamp->second < 0 || timestamp->second > 60) {
-        return 0;
-    }
-
-    days_in_month = 31;
-    if (timestamp->month == 4 || timestamp->month == 6
-        || timestamp->month == 9 || timestamp->month == 11) {
-        days_in_month = 30;
-    } else if (timestamp->month == 2) {
-        int leap_year = timestamp->year % 400 == 0
-            || (timestamp->year % 4 == 0 && timestamp->year % 100 != 0);
-        days_in_month = leap_year ? 29 : 28;
-    }
-
-    return timestamp->day <= days_in_month;
+    return timestamp != NULL
+        && expense_date_is_valid(
+            timestamp->year,
+            timestamp->month,
+            timestamp->day
+        )
+        && timestamp->hour >= 0 && timestamp->hour <= 23
+        && timestamp->minute >= 0 && timestamp->minute <= 59
+        && timestamp->second >= 0 && timestamp->second <= 60;
 }
 
 static StorageResult load_expense(
