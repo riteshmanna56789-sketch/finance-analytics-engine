@@ -153,6 +153,13 @@ typedef struct {
     size_t largest_decrease_count;
 } AnalyticsComparisonInsights;
 
+typedef struct {
+    AnalyticsPeriod period;
+    AnalyticsSummary summary;
+    AnalyticsCategoryBreakdown category_breakdown;
+    AnalyticsCategoryInsights category_insights;
+} AnalyticsReport;
+
 #define ANALYTICS_MAX_MONTHLY_TREND_PERIODS 1200
 #define ANALYTICS_MAX_YEARLY_TREND_PERIODS 200
 
@@ -287,6 +294,22 @@ void analytics_period_insights_destroy(AnalyticsPeriodInsights *insights);
 void analytics_comparison_insights_destroy(
     AnalyticsComparisonInsights *insights
 );
+
+/*
+ * Builds an all-time, monthly, yearly, or inclusive date-range report by
+ * composing the existing summary, category breakdown, and insight APIs.
+ * The report owns its nested allocated results until
+ * analytics_report_destroy() is called. Generation is read-only and does not
+ * reorder or modify either input list.
+ */
+AnalyticsResult analytics_calculate_report(
+    const ExpenseList *expenses,
+    const CategoryList *categories,
+    const AnalyticsPeriod *period,
+    AnalyticsReport *report
+);
+
+void analytics_report_destroy(AnalyticsReport *report);
 
 void analytics_summary_destroy(AnalyticsSummary *summary);
 

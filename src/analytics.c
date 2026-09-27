@@ -1656,6 +1656,104 @@ void analytics_comparison_insights_destroy(
     memset(insights, 0, sizeof(*insights));
 }
 
+AnalyticsResult analytics_calculate_report(
+    const ExpenseList *expenses,
+    const CategoryList *categories,
+    const AnalyticsPeriod *period,
+    AnalyticsReport *report
+)
+{
+    AnalyticsResult result;
+
+    if (report == NULL) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+    memset(report, 0, sizeof(*report));
+
+    if (expenses == NULL || categories == NULL || period == NULL
+        || !period_is_valid(period)
+        || (period->type != ANALYTICS_PERIOD_ALL_TIME
+            && period->type != ANALYTICS_PERIOD_MONTH
+            && period->type != ANALYTICS_PERIOD_YEAR
+            && period->type != ANALYTICS_PERIOD_DATE_RANGE)) {
+        return ANALYTICS_INVALID_INPUT;
+    }
+
+    report->period = *period;
+    if (period->type == ANALYTICS_PERIOD_ALL_TIME) {
+        result = analytics_calculate_summary(
+            expenses,
+            categories,
+            &report->summary
+        );
+    } else if (period->type == ANALYTICS_PERIOD_MONTH) {
+        result = analytics_calculate_monthly_summary(
+            expenses,
+            period->year,
+            period->month,
+            &report->summary
+        );
+    } else if (period->type == ANALYTICS_PERIOD_YEAR) {
+        result = analytics_calculate_yearly_summary(
+            expenses,
+            period->year,
+            &report->summary
+        );
+    } else {
+        result = analytics_calculate_date_range_summary(
+            expenses,
+            &period->start_date,
+            &period->end_date,
+            &report->summary
+        );
+    }
+    if (result != ANALYTICS_SUCCESS) {
+        goto fail;
+    }
+
+    result = analytics_calculate_category_breakdown(
+        expenses,
+        categories,
+        period->type == ANALYTICS_PERIOD_ALL_TIME ? NULL : period,
+        &report->category_breakdown
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        goto fail;
+    }
+    if (report->summary.total_paise != report->category_breakdown.total_paise
+        || report->summary.transaction_count
+            != report->category_breakdown.transaction_count) {
+        result = ANALYTICS_INVALID_INPUT;
+        goto fail;
+    }
+
+    result = analytics_extract_category_insights(
+        &report->category_breakdown,
+        &report->category_insights
+    );
+    if (result != ANALYTICS_SUCCESS) {
+        goto fail;
+    }
+
+    return ANALYTICS_SUCCESS;
+
+fail:
+    analytics_report_destroy(report);
+    return result;
+}
+
+void analytics_report_destroy(AnalyticsReport *report)
+{
+    if (report == NULL) {
+        return;
+    }
+
+    analytics_summary_destroy(&report->summary);
+    analytics_category_breakdown_destroy(&report->category_breakdown);
+    analytics_category_insights_destroy(&report->category_insights);
+    memset(&report->period, 0, sizeof(report->period));
+}
+
 void analytics_summary_destroy(AnalyticsSummary *summary)
 {
     if (summary == NULL) {

@@ -1076,6 +1076,231 @@ static void show_financial_insights(
     }
 }
 
+static void print_report_period(const AnalyticsPeriod *period)
+{
+    static const char *const month_names[] = {
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    };
+
+    switch (period->type) {
+    case ANALYTICS_PERIOD_ALL_TIME:
+        printf("All Time");
+        break;
+    case ANALYTICS_PERIOD_MONTH:
+        printf(
+            "%s %04d",
+            month_names[period->month - 1],
+            period->year
+        );
+        break;
+    case ANALYTICS_PERIOD_YEAR:
+        printf("%04d", period->year);
+        break;
+    case ANALYTICS_PERIOD_DATE_RANGE:
+        printf(
+            "%04d-%02d-%02d to %04d-%02d-%02d",
+            period->start_date.year,
+            period->start_date.month,
+            period->start_date.day,
+            period->end_date.year,
+            period->end_date.month,
+            period->end_date.day
+        );
+        break;
+    case ANALYTICS_PERIOD_DAY:
+        printf(
+            "%04d-%02d-%02d",
+            period->date.year,
+            period->date.month,
+            period->date.day
+        );
+        break;
+    }
+}
+
+static void print_report_categories(
+    const AnalyticsReport *report,
+    const CategoryList *categories
+)
+{
+    if (report->category_breakdown.transaction_count == 0) {
+        printf("No transactions found for this period.\n");
+        return;
+    }
+
+    printf("%-24s %14s %12s %10s\n",
+        "Category", "Transactions", "Total", "Share");
+    for (size_t index = 0; index < report->category_breakdown.size; index++) {
+        const AnalyticsCategoryTotal *category =
+            &report->category_breakdown.items[index];
+        const Category *source_category = category_find_by_id(
+            categories,
+            category->category_id
+        );
+
+        printf(
+            "%-20s%s %-14zu ",
+            category->category_name,
+            source_category != NULL && !source_category->is_active
+                ? " (inactive)"
+                : "",
+            category->transaction_count
+        );
+        print_amount(category->total_paise);
+        printf(
+            " %5u.%02u%%\n",
+            category->percentage_basis_points / 100,
+            category->percentage_basis_points % 100
+        );
+    }
+}
+
+static void print_report(const AnalyticsReport *report, const CategoryList *categories)
+{
+    const AnalyticsSummary *summary = &report->summary;
+
+    printf("\n========================================\n");
+    printf("FINANCIAL REPORT - ");
+    print_report_period(&report->period);
+    printf("\n========================================\n");
+
+    printf("\nOVERVIEW\n");
+    printf("----------------------------------------\n");
+    printf("Total Spending:       ");
+    print_amount(summary->total_paise);
+    printf("\nTransactions:         %zu\n", summary->transaction_count);
+    if (summary->transaction_count == 0) {
+        printf("No transactions found for this period.\n");
+    } else {
+        printf("Average Transaction: ");
+        print_amount(summary->average_paise);
+        if (summary->average_remainder_paise != 0) {
+            printf(
+                " + %" PRId64 "/%zu paise",
+                summary->average_remainder_paise,
+                summary->transaction_count
+            );
+        }
+        printf("\nMinimum Expense:     ");
+        print_amount(summary->minimum_paise);
+        printf("\nMaximum Expense:     ");
+        print_amount(summary->maximum_paise);
+        printf("\n");
+    }
+
+    printf("\nCATEGORY BREAKDOWN\n");
+    printf("----------------------------------------\n");
+    print_report_categories(report, categories);
+
+    printf("\nINSIGHTS\n");
+    printf("----------------------------------------\n");
+    if (report->category_insights.highest_count == 0) {
+        printf("No category data for this period.\n");
+    } else {
+        print_category_insight_group(
+            "Highest-spending category",
+            report->category_insights.highest_spending,
+            report->category_insights.highest_count,
+            1
+        );
+        print_category_insight_group(
+            "Lowest-spending category among categories with transactions",
+            report->category_insights.lowest_spending,
+            report->category_insights.lowest_count,
+            0
+        );
+    }
+}
+
+static void show_report(
+    const ExpenseList *expenses,
+    const CategoryList *categories,
+    AnalyticsPeriodType type
+)
+{
+    AnalyticsPeriod period = {0};
+    AnalyticsReport report;
+    AnalyticsResult result;
+
+    period.type = type;
+    if (type == ANALYTICS_PERIOD_MONTH) {
+        if (!read_integer("Year (1-9999): ", &period.year)
+            || period.year < 1 || period.year > 9999
+            || !read_integer("Month (1-12): ", &period.month)
+            || period.month < 1 || period.month > 12) {
+            printf("Invalid year or month.\n");
+            return;
+        }
+    } else if (type == ANALYTICS_PERIOD_YEAR) {
+        if (!read_integer("Year (1-9999): ", &period.year)
+            || period.year < 1 || period.year > 9999) {
+            printf("Invalid year.\n");
+            return;
+        }
+    } else if (type == ANALYTICS_PERIOD_DATE_RANGE) {
+        if (!read_date("Start date (YYYY-MM-DD): ", &period.start_date)
+            || !read_date("End date (YYYY-MM-DD): ", &period.end_date)
+            || period.start_date.year > period.end_date.year
+            || (period.start_date.year == period.end_date.year
+                && (period.start_date.month > period.end_date.month
+                    || (period.start_date.month == period.end_date.month
+                        && period.start_date.day > period.end_date.day)))) {
+            printf("Invalid date range.\n");
+            return;
+        }
+    }
+
+    result = analytics_calculate_report(
+        expenses,
+        categories,
+        &period,
+        &report
+    );
+    if (result == ANALYTICS_INVALID_CATEGORY) {
+        printf("Unable to generate report: an expense references an unknown category.\n");
+    } else if (result == ANALYTICS_MEMORY_ERROR) {
+        printf("Unable to generate report: memory allocation failed.\n");
+    } else if (result == ANALYTICS_OVERFLOW) {
+        printf("Unable to generate report: a total overflowed.\n");
+    } else if (result != ANALYTICS_SUCCESS) {
+        printf("Unable to generate report: invalid period or expense data.\n");
+    } else {
+        print_report(&report, categories);
+        analytics_report_destroy(&report);
+    }
+}
+
+static void show_reports_menu(
+    const ExpenseList *expenses,
+    const CategoryList *categories
+)
+{
+    int choice;
+
+    printf("\nReports\n");
+    printf("[1] Overall Report\n");
+    printf("[2] Monthly Report\n");
+    printf("[3] Yearly Report\n");
+    printf("[4] Custom Date Range Report\n");
+    printf("[0] Back\n");
+    if (!read_integer("Choice (0-4): ", &choice)
+        || choice < 0 || choice > 4) {
+        printf("Invalid report selection.\n");
+        return;
+    }
+
+    if (choice == 1) {
+        show_report(expenses, categories, ANALYTICS_PERIOD_ALL_TIME);
+    } else if (choice == 2) {
+        show_report(expenses, categories, ANALYTICS_PERIOD_MONTH);
+    } else if (choice == 3) {
+        show_report(expenses, categories, ANALYTICS_PERIOD_YEAR);
+    } else if (choice == 4) {
+        show_report(expenses, categories, ANALYTICS_PERIOD_DATE_RANGE);
+    }
+}
+
 static void show_trend(
     const ExpenseList *expenses,
     AnalyticsTrendType type
@@ -1172,8 +1397,9 @@ void analytics_ui_show_summary(
         printf("[7] Compare Periods\n");
         printf("[8] Spending Trends\n");
         printf("[9] Financial Insights\n");
+        printf("[10] Reports\n");
         printf("[0] Back\n");
-        printf("Choice (0-9): ");
+        printf("Choice (0-10): ");
 
         read_result = read_input(input, sizeof(input));
         if (read_result == 0) {
@@ -1181,7 +1407,7 @@ void analytics_ui_show_summary(
             return;
         }
         if (read_result < 0) {
-            printf("Choice is too long. Enter a number from 0 to 9.\n");
+            printf("Choice is too long. Enter a number from 0 to 10.\n");
             continue;
         }
 
@@ -1195,8 +1421,8 @@ void analytics_ui_show_summary(
                 end++;
             }
             if (input == end || errno == ERANGE || *end != '\0'
-                || parsed < 0 || parsed > 9) {
-                printf("Invalid choice. Enter a number from 0 to 9.\n");
+                || parsed < 0 || parsed > 10) {
+                printf("Invalid choice. Enter a number from 0 to 10.\n");
                 continue;
             }
             choice = (int)parsed;
@@ -1229,6 +1455,9 @@ void analytics_ui_show_summary(
             break;
         case 9:
             show_financial_insights(expenses, categories);
+            break;
+        case 10:
+            show_reports_menu(expenses, categories);
             break;
         case 0:
             running = 0;

@@ -45,6 +45,9 @@ the same local CLI architecture.
   increase, or decrease between compared periods. Empty results and
   zero-baseline shares are reported explicitly; the application does not
   generate subjective financial advice.
+- Generate read-only overall, monthly, yearly, and custom inclusive date-range
+  reports combining existing summaries, category breakdowns, percentages,
+  and objective category insights.
 - Validate user input and stored records, including amounts, IDs, categories,
   dates, and string boundaries.
 - Run assertion-based hardening tests for data operations, querying, sorting,
@@ -81,9 +84,13 @@ Major module responsibilities:
   Derived insight functions operate on existing breakdown, trend, and
   comparison results, preserve all ties in source order, and own only their
   returned winner arrays until their corresponding destroy functions run.
+  Report generation composes the existing summary, category breakdown, and
+  category insight APIs without changing expense or category data; callers
+  release the report's nested allocations with `analytics_report_destroy()`.
 - **analytics_ui** (`analytics_ui.h`, `analytics_ui.c`): presentation and
-  input for overall, time-based, category-based, trend, comparison, and
-  objective financial insights, keeping analytics UI out of `main`.
+  input for overall, time-based, category-based, trend, comparison,
+  objective financial insights, and reports, keeping analytics UI out of
+  `main`.
 - **query** (`query.h`, `query.c`): category, amount, time, note, date/amount
   range, and combined expense queries.
 - **sorting** (`sorting.h`, `sorting.c`): stable sorting of a temporary

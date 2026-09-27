@@ -1430,6 +1430,9 @@ int main(void)
         AnalyticsCategoryBreakdown overflowing_breakdown = {0};
         AnalyticsTrendPeriod overflowing_periods[2] = {0};
         AnalyticsTrend overflowing_trend = {0};
+        AnalyticsReport report;
+        Expense expenses_before[6];
+        Category categories_before[3];
 
         category_list_init(&insight_categories);
         expense_list_init(&insight_expenses);
@@ -1465,6 +1468,162 @@ int main(void)
             &insight_expenses,
             make_expense(6, 3, 2031, 1, 1, 500, "Gamma B")
         ) == EXPENSE_SUCCESS);
+        assert(insight_expenses.size == 6);
+        memcpy(
+            expenses_before,
+            insight_expenses.items,
+            sizeof(expenses_before)
+        );
+        memcpy(
+            categories_before,
+            insight_categories.items,
+            sizeof(categories_before)
+        );
+
+        period_a.type = ANALYTICS_PERIOD_ALL_TIME;
+        assert(analytics_calculate_report(
+            &insight_expenses,
+            &insight_categories,
+            &period_a,
+            &report
+        ) == ANALYTICS_SUCCESS);
+        assert(report.summary.total_paise == 7000);
+        assert(report.summary.transaction_count == 6);
+        assert(report.summary.average_paise == 1166);
+        assert(report.summary.average_remainder_paise == 4);
+        assert(report.summary.minimum_paise == 500);
+        assert(report.summary.maximum_paise == 1500);
+        assert(report.category_breakdown.size == 3);
+        assert(report.category_breakdown.total_paise == 7000);
+        assert(report.category_breakdown.items[0].category_id == 1);
+        assert(report.category_breakdown.items[0].total_paise == 2500);
+        assert(report.category_breakdown.items[0].percentage_basis_points
+            == 3571);
+        assert(report.category_breakdown.items[2].category_id == 3);
+        assert(report.category_insights.highest_count == 2);
+        assert(report.category_insights.highest_spending[0].category_id == 1);
+        assert(report.category_insights.highest_spending[1].category_id == 2);
+        assert(memcmp(
+            expenses_before,
+            insight_expenses.items,
+            sizeof(expenses_before)
+        ) == 0);
+        assert(memcmp(
+            categories_before,
+            insight_categories.items,
+            sizeof(categories_before)
+        ) == 0);
+        analytics_report_destroy(&report);
+        assert(report.summary.category_totals_paise == NULL);
+        assert(report.category_breakdown.items == NULL);
+        assert(report.category_insights.highest_spending == NULL);
+
+        period_a.type = ANALYTICS_PERIOD_MONTH;
+        period_a.year = 2030;
+        period_a.month = 1;
+        assert(analytics_calculate_report(
+            &insight_expenses,
+            &insight_categories,
+            &period_a,
+            &report
+        ) == ANALYTICS_SUCCESS);
+        assert(report.summary.total_paise == 3500);
+        assert(report.summary.transaction_count == 3);
+        assert(report.summary.average_paise == 1166);
+        assert(report.summary.average_remainder_paise == 2);
+        assert(report.summary.minimum_paise == 1000);
+        assert(report.summary.maximum_paise == 1500);
+        assert(report.category_breakdown.size == 3);
+        assert(report.category_breakdown.items[2].category_id == 3);
+        analytics_report_destroy(&report);
+
+        period_a.type = ANALYTICS_PERIOD_YEAR;
+        period_a.year = 2031;
+        assert(analytics_calculate_report(
+            &insight_expenses,
+            &insight_categories,
+            &period_a,
+            &report
+        ) == ANALYTICS_SUCCESS);
+        assert(report.summary.total_paise == 3500);
+        assert(report.summary.transaction_count == 3);
+        assert(report.category_breakdown.items[2].total_paise == 500);
+        analytics_report_destroy(&report);
+
+        period_a.type = ANALYTICS_PERIOD_DATE_RANGE;
+        period_a.start_date.year = 2030;
+        period_a.start_date.month = 1;
+        period_a.start_date.day = 1;
+        period_a.end_date.year = 2030;
+        period_a.end_date.month = 12;
+        period_a.end_date.day = 31;
+        assert(analytics_calculate_report(
+            &insight_expenses,
+            &insight_categories,
+            &period_a,
+            &report
+        ) == ANALYTICS_SUCCESS);
+        assert(report.summary.total_paise == 3500);
+        assert(report.summary.transaction_count == 3);
+        assert(report.category_breakdown.total_paise == 3500);
+        analytics_report_destroy(&report);
+
+        period_a.type = ANALYTICS_PERIOD_YEAR;
+        period_a.year = 2040;
+        assert(analytics_calculate_report(
+            &insight_expenses,
+            &insight_categories,
+            &period_a,
+            &report
+        ) == ANALYTICS_SUCCESS);
+        assert(report.summary.total_paise == 0);
+        assert(report.summary.transaction_count == 0);
+        assert(report.summary.minimum_paise == 0);
+        assert(report.summary.maximum_paise == 0);
+        assert(report.category_breakdown.size == 0);
+        assert(report.category_insights.highest_count == 0);
+        analytics_report_destroy(&report);
+
+        period_a.type = ANALYTICS_PERIOD_ALL_TIME;
+        assert(analytics_calculate_report(
+            &no_expenses,
+            &insight_categories,
+            &period_a,
+            &report
+        ) == ANALYTICS_SUCCESS);
+        assert(report.summary.total_paise == 0);
+        assert(report.summary.transaction_count == 0);
+        assert(report.summary.minimum_paise == 0);
+        assert(report.summary.maximum_paise == 0);
+        assert(report.category_breakdown.transaction_count == 0);
+        analytics_report_destroy(&report);
+
+        period_a.type = ANALYTICS_PERIOD_DATE_RANGE;
+        period_a.start_date.year = 2031;
+        period_a.start_date.month = 1;
+        period_a.start_date.day = 1;
+        period_a.end_date.year = 2030;
+        period_a.end_date.month = 12;
+        period_a.end_date.day = 31;
+        assert(analytics_calculate_report(
+            &insight_expenses,
+            &insight_categories,
+            &period_a,
+            &report
+        ) == ANALYTICS_INVALID_INPUT);
+        assert(report.summary.category_totals_paise == NULL);
+        assert(report.category_breakdown.items == NULL);
+
+        assert(memcmp(
+            expenses_before,
+            insight_expenses.items,
+            sizeof(expenses_before)
+        ) == 0);
+        assert(memcmp(
+            categories_before,
+            insight_categories.items,
+            sizeof(categories_before)
+        ) == 0);
 
         assert(analytics_calculate_category_breakdown(
             &insight_expenses,
@@ -1630,6 +1789,16 @@ int main(void)
             NULL,
             &breakdown
         ) == ANALYTICS_INVALID_CATEGORY);
+        period_a.type = ANALYTICS_PERIOD_ALL_TIME;
+        assert(analytics_calculate_report(
+            &invalid_reference_expenses,
+            &insight_categories,
+            &period_a,
+            &report
+        ) == ANALYTICS_INVALID_CATEGORY);
+        assert(report.summary.category_totals_paise == NULL);
+        assert(report.category_breakdown.items == NULL);
+        assert(report.category_insights.highest_spending == NULL);
 
         overflowing_categories[0].category_id = 1;
         strcpy(overflowing_categories[0].category_name, "Alpha");
