@@ -19,15 +19,25 @@
 
 static volatile uint64_t enumeration_sink;
 
-static int path_exists(const char *filename)
+static int path_state(const char *filename)
 {
     FILE *file = fopen(filename, "rb");
 
-    if (file == NULL) {
+    if (file != NULL) {
+        if (fclose(file) != 0) {
+            fprintf(stderr, "Unable to inspect benchmark file: %s\n",
+                filename);
+            return -1;
+        }
+        return 1;
+    }
+
+    if (errno == ENOENT) {
         return 0;
     }
-    fclose(file);
-    return 1;
+
+    fprintf(stderr, "Unable to inspect benchmark file: %s\n", filename);
+    return -1;
 }
 
 static int remove_if_present(const char *filename)
@@ -279,6 +289,8 @@ int benchmark_storage_and_category_enumeration(void)
     static const size_t category_sizes[] = {100, 1000, 10000, 100000};
     char filename[512];
     char temporary_filename[512];
+    int filename_state;
+    int temporary_filename_state;
     int filename_length = snprintf(
         filename,
         sizeof(filename),
@@ -301,7 +313,12 @@ int benchmark_storage_and_category_enumeration(void)
         fprintf(stderr, "Unable to construct temporary benchmark filename\n");
         return 0;
     }
-    if (path_exists(filename) || path_exists(temporary_filename)) {
+    filename_state = path_state(filename);
+    temporary_filename_state = path_state(temporary_filename);
+    if (filename_state < 0 || temporary_filename_state < 0) {
+        return 0;
+    }
+    if (filename_state || temporary_filename_state) {
         fprintf(stderr, "Storage benchmark file already exists: %s\n",
             filename);
         return 0;

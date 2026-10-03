@@ -7,3 +7,9 @@ data/*.tmp
 .vscode/
 
 *.tmp
+
+# Temporary persistence fixtures created by tests and benchmarks.
+tests/storage_test_*.dat
+tests/storage_v1_test_*.dat
+tests/storage_missing_*.dat
+/finance_benchmark_storage_*.dat

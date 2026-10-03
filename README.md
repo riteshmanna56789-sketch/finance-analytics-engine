@@ -55,11 +55,12 @@ the same local CLI architecture.
 
 ## Architecture
 
-The project is organized into three directories:
+The project is organized into four directories:
 
 - `include/` contains public module interfaces and data types.
 - `src/` contains the application and module implementations.
 - `tests/` contains the hardening test program.
+- `benchmarks/` contains standalone performance measurement programs.
 
 Major module responsibilities:
 
@@ -276,6 +277,8 @@ Finance Analytics Engine/
 │   ├── test_support.h
 │   └── test_workflows.c
 ├── benchmarks/
+│   ├── benchmark_auxiliary.c
+│   ├── benchmark_auxiliary.h
 │   ├── benchmark_data.c
 │   ├── benchmark_data.h
 │   └── benchmark_runner.c
