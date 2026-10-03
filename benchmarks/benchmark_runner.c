@@ -1,4 +1,5 @@
 #include "analytics.h"
+#include "benchmark_auxiliary.h"
 #include "benchmark_data.h"
 #include "query.h"
 #include "sorting.h"
@@ -544,6 +545,10 @@ int main(void)
             || !benchmark_expense_operations(dataset_sizes[index])) {
             return EXIT_FAILURE;
         }
+    }
+
+    if (!benchmark_storage_and_category_enumeration()) {
+        return EXIT_FAILURE;
     }
 
     fprintf(stderr, "benchmark_sink=%" PRIu64 "\n", benchmark_sink);

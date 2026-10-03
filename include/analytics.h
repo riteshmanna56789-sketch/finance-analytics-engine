@@ -41,6 +41,10 @@ typedef struct {
     int64_t average_remainder_paise;
     int64_t minimum_paise;
     int64_t maximum_paise;
+    /*
+     * When produced by analytics_calculate_summary(), entry i corresponds to
+     * categories->items[i] from the CategoryList supplied to that calculation.
+     */
     int64_t *category_totals_paise;
     size_t category_count;
 } AnalyticsSummary;

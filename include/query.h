@@ -38,6 +38,11 @@ typedef struct {
     const char *note;
 } QueryFilter;
 
+/*
+ * The callback receives a borrowed const Expense pointer. Query functions do
+ * not transfer ownership; the pointer is valid only during the callback and
+ * must not be retained or used after it returns.
+ */
 typedef void (*QueryMatchCallback)(
     const Expense *expense,
     void *context

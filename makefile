@@ -27,10 +27,12 @@ TEST_MODULES = \
 BENCHMARK_APP = finance_benchmarks.exe
 BENCHMARK_SOURCES = \
 	benchmarks/benchmark_runner.c \
-	benchmarks/benchmark_data.c
+	benchmarks/benchmark_data.c \
+	benchmarks/benchmark_auxiliary.c
 BENCHMARK_MODULES = \
 	src/expense.c \
 	src/category.c \
+	src/storage.c \
 	src/analytics.c \
 	src/query.c \
 	src/sorting.c
@@ -48,7 +50,7 @@ $(TEST_APP): $(TEST_SOURCES) $(TEST_HEADERS) $(TEST_MODULES)
 test: $(TEST_APP)
 	./$(TEST_APP)
 
-$(BENCHMARK_APP): $(BENCHMARK_SOURCES) benchmarks/benchmark_data.h $(BENCHMARK_MODULES)
+$(BENCHMARK_APP): $(BENCHMARK_SOURCES) benchmarks/benchmark_data.h benchmarks/benchmark_auxiliary.h $(BENCHMARK_MODULES)
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(BENCHMARK_SOURCES) $(BENCHMARK_MODULES) -o $@
 
 benchmark: $(BENCHMARK_APP)

@@ -18,6 +18,12 @@ StorageResult storage_save(
     const ExpenseList *expenses
 );
 
+/*
+ * categories and expenses must be initialized, valid lists. On success, their
+ * existing contents are destroyed and replaced by the loaded lists. On
+ * failure, their existing contents remain unchanged. The caller owns and
+ * remains responsible for destroying the resulting lists.
+ */
 StorageResult storage_load(
     const char *filename,
     CategoryList *categories,

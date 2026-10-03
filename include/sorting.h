@@ -21,8 +21,9 @@ typedef enum {
 } SortingResult;
 
 /*
- * A non-owning view of expenses. The array is temporary, while each Expense
- * remains owned by the original ExpenseList.
+ * The view owns its allocated pointer array; each Expense remains owned by
+ * the original ExpenseList. Pointers are valid only while that list's
+ * storage remains stable; deletion or reallocation can invalidate them.
  */
 typedef struct {
     const Expense **items;
@@ -35,7 +36,8 @@ typedef struct {
  * Stable merge sort is used, with O(n log n) expense comparisons and O(n)
  * additional space. Stability preserves the original list order when keys
  * compare equal. Category sorting retains the existing category-ID lookups
- * within each comparison.
+ * within each comparison. Destroy an existing view before reusing its output
+ * object.
  */
 SortingResult sorting_create_view(
     const ExpenseList *expenses,

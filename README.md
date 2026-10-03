@@ -186,7 +186,7 @@ also compared wherever both are run.
 Build and run with GCC from the project root:
 
 ```powershell
-gcc -std=c17 -Wall -Wextra -Wpedantic -Iinclude benchmarks/benchmark_runner.c benchmarks/benchmark_data.c src/expense.c src/category.c src/analytics.c src/query.c src/sorting.c -o finance_benchmarks.exe
+gcc -std=c17 -Wall -Wextra -Wpedantic -Iinclude benchmarks/benchmark_runner.c benchmarks/benchmark_data.c benchmarks/benchmark_auxiliary.c src/expense.c src/category.c src/storage.c src/analytics.c src/query.c src/sorting.c -o finance_benchmarks.exe
 .\finance_benchmarks.exe
 ```
 
@@ -201,6 +201,44 @@ bounded. Run from the project root to reproduce the same data and output
 shape; absolute timings vary by machine, compiler, and system load. The
 insertion-sort row preserves a comparable baseline after the production
 algorithm change. The lowercase `makefile` also provides `make benchmark`.
+
+The benchmark also measures versioned storage save/load using the same
+deterministic expense generator and 64 categories, and active-category
+enumeration using `category_active_count()` followed by
+`category_find_active_by_index()` for each active entry. These auxiliary
+measurements use wall-clock time from C17 `timespec_get(TIME_UTC)`, exclude
+data generation, and report repetition counts, mean elapsed time, estimated
+input array bytes, and serialized file bytes for storage. Storage runs at
+100, 1,000, and 10,000 expenses; 100,000 is explicitly skipped because the
+current storage validation and loading duplicate checks require quadratic
+expense scans. Enumeration runs at 100, 1,000, 10,000, and 100,000 active
+categories. Storage uses a process-specific benchmark file in the project
+root and removes it and its temporary save file afterward; it does not access
+`data/finance.dat`.
+
+### V3.2 Performance Conclusion
+
+The baseline uses deterministic synthetic datasets of 100, 1,000, 10,000, and
+100,000 expenses. Data generation and sorting correctness checks are outside
+the timed interval; operations are timed with standard C `clock()` CPU time,
+with operation-owned output allocation and cleanup included where applicable.
+At 100,000 records, the measured results were:
+
+| Operation | CPU time |
+| --- | ---: |
+| Category lookup | 130 µs |
+| Combined query | 800 µs |
+| Overall summary | 8.24 ms |
+| Category breakdown | 7.2 ms |
+| 12-month trend | 29.4 ms |
+| Production merge sort | 20.0 ms |
+
+Sorting demonstrated a meaningful scaling bottleneck and was changed from
+stable insertion sort to stable merge sort. The measured results for the
+other operations do not justify additional data structures, indexing,
+caching, or algorithmic complexity at the current project scale, so their
+implementations are retained. Future optimization should be driven by
+measured bottlenecks rather than theoretical complexity alone.
 
 ## Project Structure
 
