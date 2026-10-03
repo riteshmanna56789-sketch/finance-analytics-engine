@@ -32,9 +32,10 @@ typedef struct {
 /*
  * Creates a sorted pointer view without changing expenses.
  *
- * Stable insertion sort is used: O(n^2) time in the worst case and O(n)
+ * Stable merge sort is used, with O(n log n) expense comparisons and O(n)
  * additional space. Stability preserves the original list order when keys
- * compare equal.
+ * compare equal. Category sorting retains the existing category-ID lookups
+ * within each comparison.
  */
 SortingResult sorting_create_view(
     const ExpenseList *expenses,
