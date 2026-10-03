@@ -149,24 +149,58 @@ Run the application from the project root:
 
 ## Testing
 
-The hardening tests use C assertions and temporary test data under `tests/`.
-They should be run from the project root and do not use
-`data/finance.dat`.
+The tests use standard C assertions and temporary test data under `tests/`.
+They should be run from the project root and do not use `data/finance.dat`.
+The single `finance_tests.exe` executable runs independent suites for
+categories, expenses, queries, sorting, analytics, storage, and cross-module
+workflows. Assertions must remain enabled when building the tests.
 
-Compile the test program:
-
-```powershell
-gcc -std=c17 -Wall -Wextra -Wpedantic -Iinclude tests/hardening.c src/expense.c src/category.c src/storage.c src/analytics.c src/query.c src/sorting.c src/expense_management.c -o hardening.exe
-```
-
-Run it:
+Build and run the test program with GCC:
 
 ```powershell
-.\hardening.exe
+gcc -std=c17 -Wall -Wextra -Wpedantic -Iinclude tests/test_runner.c tests/test_category.c tests/test_expense.c tests/test_query.c tests/test_sorting.c tests/test_analytics.c tests/test_storage.c tests/test_workflows.c src/expense.c src/category.c src/storage.c src/analytics.c src/query.c src/sorting.c src/expense_management.c -o finance_tests.exe
+.\finance_tests.exe
 ```
 
-The repository’s lowercase `makefile` also defines `make`, `make test`, and
-`make clean` targets. These targets require GNU Make to be installed.
+The repository’s lowercase `makefile` `test` target builds and runs the same
+suite set as the manual command. `make`, `make test`, and `make clean` require
+GNU Make to be installed.
+
+## Benchmarks
+
+The standalone `finance_benchmarks.exe` measures the current category lookup,
+combined query, overall summary, category breakdown, 12-month trend, and
+amount-sorting implementations. It generates deterministic in-memory data at
+100, 1,000, 10,000, and 100,000 expenses; category lookup uses the same sizes
+as category-list lengths. It compares a benchmark-only stable insertion-sort
+baseline with the production stable merge sort, both sorting
+amount-ascending pointer views. Production sorting uses merge sort with
+O(n log n) expense comparisons and O(n) additional space; category sorting
+retains the existing category-ID lookup in each comparison.
+Both are timed at 100, 1,000, and 10,000 records; only merge sort is timed at
+100,000 because insertion sort's quadratic scaling makes that case
+impractical. Before timing, each implementation is checked for ordering,
+stability, and preservation of the input list. Their output pointer order is
+also compared wherever both are run.
+
+Build and run with GCC from the project root:
+
+```powershell
+gcc -std=c17 -Wall -Wextra -Wpedantic -Iinclude benchmarks/benchmark_runner.c benchmarks/benchmark_data.c src/expense.c src/category.c src/analytics.c src/query.c src/sorting.c -o finance_benchmarks.exe
+.\finance_benchmarks.exe
+```
+
+The benchmark writes CSV rows to standard output with operation, data size,
+repetition count, total CPU time, mean CPU nanoseconds per operation, and a
+checksum. Timing uses standard C `clock()` CPU time. Synthetic-data creation
+is outside the timed interval; API-owned output allocation and matching
+destruction are included in measured operations. Sorting correctness checks
+are outside the timed interval. Both algorithms use identical repetition
+counts per dataset; repetition counts vary by dataset size to keep runtimes
+bounded. Run from the project root to reproduce the same data and output
+shape; absolute timings vary by machine, compiler, and system load. The
+insertion-sort row preserves a comparable baseline after the production
+algorithm change. The lowercase `makefile` also provides `make benchmark`.
 
 ## Project Structure
 
@@ -194,7 +228,19 @@ Finance Analytics Engine/
 │   ├── sorting.c
 │   └── storage.c
 ├── tests/
-│   └── hardening.c
+│   ├── test_analytics.c
+│   ├── test_category.c
+│   ├── test_expense.c
+│   ├── test_query.c
+│   ├── test_runner.c
+│   ├── test_sorting.c
+│   ├── test_storage.c
+│   ├── test_support.h
+│   └── test_workflows.c
+├── benchmarks/
+│   ├── benchmark_data.c
+│   ├── benchmark_data.h
+│   └── benchmark_runner.c
 ├── makefile
 └── README.md
 ```

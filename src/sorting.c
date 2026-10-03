@@ -77,6 +77,41 @@ static int compare_expenses(
     }
 }
 
+static void merge_expense_views(
+    const Expense **source,
+    const Expense **destination,
+    size_t begin,
+    size_t middle,
+    size_t end,
+    const CategoryList *categories,
+    SortingOption option
+)
+{
+    size_t left = begin;
+    size_t right = middle;
+    size_t output = begin;
+
+    while (left < middle && right < end) {
+        if (compare_expenses(
+                source[left],
+                source[right],
+                categories,
+                option
+            ) <= 0) {
+            destination[output++] = source[left++];
+        } else {
+            destination[output++] = source[right++];
+        }
+    }
+
+    while (left < middle) {
+        destination[output++] = source[left++];
+    }
+    while (right < end) {
+        destination[output++] = source[right++];
+    }
+}
+
 SortingResult sorting_create_view(
     const ExpenseList *expenses,
     const CategoryList *categories,
@@ -84,6 +119,10 @@ SortingResult sorting_create_view(
     ExpenseView *view
 )
 {
+    const Expense **source;
+    const Expense **destination;
+    const Expense **scratch;
+
     if (expenses == NULL || categories == NULL || view == NULL
         || option < SORT_BY_DATE_NEWEST
         || option > SORT_BY_CATEGORY_ASCENDING
@@ -112,23 +151,72 @@ SortingResult sorting_create_view(
     view->size = expenses->size;
 
     for (size_t index = 0; index < expenses->size; index++) {
-        const Expense *current = &expenses->items[index];
-        size_t insertion_index = index;
-
-        while (insertion_index > 0
-            && compare_expenses(
-                current,
-                view->items[insertion_index - 1],
-                categories,
-                option
-            ) < 0) {
-            view->items[insertion_index] = view->items[insertion_index - 1];
-            insertion_index--;
-        }
-
-        view->items[insertion_index] = current;
+        view->items[index] = &expenses->items[index];
     }
 
+    if (expenses->size < 2) {
+        return SORTING_SUCCESS;
+    }
+
+    if (expenses->size > SIZE_MAX / sizeof(*destination)) {
+        sorting_view_destroy(view);
+        return SORTING_MEMORY_ERROR;
+    }
+    scratch = malloc(expenses->size * sizeof(*scratch));
+    if (scratch == NULL) {
+        sorting_view_destroy(view);
+        return SORTING_MEMORY_ERROR;
+    }
+    source = view->items;
+    destination = scratch;
+
+    for (size_t width = 1; width < expenses->size;) {
+        size_t begin = 0;
+        const Expense **temporary;
+
+        while (begin < expenses->size) {
+            size_t middle = begin + width;
+            size_t end;
+
+            if (middle > expenses->size) {
+                middle = expenses->size;
+            }
+            end = middle + width;
+            if (end > expenses->size) {
+                end = expenses->size;
+            }
+
+            merge_expense_views(
+                source,
+                destination,
+                begin,
+                middle,
+                end,
+                categories,
+                option
+            );
+            begin = end;
+        }
+
+        temporary = source;
+        source = destination;
+        destination = temporary;
+
+        if (width > expenses->size / 2) {
+            break;
+        }
+        width *= 2;
+    }
+
+    if (source != view->items) {
+        memcpy(
+            view->items,
+            source,
+            expenses->size * sizeof(*view->items)
+        );
+    }
+
+    free(scratch);
     return SORTING_SUCCESS;
 }
 
